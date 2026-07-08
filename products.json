@@ -4522,7 +4522,7 @@
   {
     "fullName": "BUDGET FAME DISTEMPER OFF WHITE-D",
     "brand": "Budget",
-    "product": "Fame Distemper",
+    "product": "SEMI",
     "code": "",
     "color": "Off White",
     "size": "D",
@@ -4532,7 +4532,7 @@
   {
     "fullName": "BUDGET FAME DISTEMPER WHITE-D",
     "brand": "Budget",
-    "product": "Fame Distemper",
+    "product": "SEMI",
     "code": "",
     "color": "White",
     "size": "D",
@@ -4552,7 +4552,7 @@
   {
     "fullName": "BUDGET NEW DISTEMPER ASH WHITE SD06-D",
     "brand": "Budget",
-    "product": "Distemper",
+    "product": "SEMI",
     "code": "SD06",
     "color": "Ash White",
     "size": "D",
@@ -4562,7 +4562,7 @@
   {
     "fullName": "BUDGET NEW DISTEMPER OFF WHITE SD05-D",
     "brand": "Budget",
-    "product": "Distemper",
+    "product": "SEMI",
     "code": "SD05",
     "color": "Off White",
     "size": "D",
@@ -4572,7 +4572,7 @@
   {
     "fullName": "BUDGET NEW DISTEMPER WHITE SD04-D",
     "brand": "Budget",
-    "product": "Distemper",
+    "product": "SEMI",
     "code": "SD04",
     "color": "White",
     "size": "D",
@@ -4652,7 +4652,7 @@
   {
     "fullName": "BUDGET SP FAME DISTEMPER OFF WHITE-D",
     "brand": "Budget",
-    "product": "Fame Distemper",
+    "product": "SEMI",
     "code": "",
     "color": "Off White",
     "size": "D",
@@ -4885,126 +4885,6 @@
     "product": "Enamel",
     "code": "DE63",
     "color": "New Ash Wht",
-    "size": "D",
-    "sizeUnit": "Drum",
-    "unit": "Drm"
-  },
-  {
-    "fullName": "EXCLUSIVE EMULSION-EP51 WHITE-D",
-    "brand": "Exclusive",
-    "product": "Semi",
-    "code": "51",
-    "color": "White",
-    "size": "D",
-    "sizeUnit": "Drum",
-    "unit": "Drm"
-  },
-  {
-    "fullName": "EXCLUSIVE EMULSION-EP51 WHITE-G",
-    "brand": "Exclusive",
-    "product": "Semi",
-    "code": "51",
-    "color": "white",
-    "size": "G",
-    "sizeUnit": "Gallon",
-    "unit": "Gln"
-  },
-  {
-    "fullName": "EXCLUSIVE EMULSION-EP51 WHITE-Q",
-    "brand": "Exclusive",
-    "product": "Semi",
-    "code": "51",
-    "color": "white",
-    "size": "Q",
-    "sizeUnit": "Quarter",
-    "unit": "Qtr"
-  },
-  {
-    "fullName": "EXCLUSIVE EMULSION-EP52 OFF WHITE-D",
-    "brand": "Exclusive",
-    "product": "Semi",
-    "code": "52",
-    "color": "Off White",
-    "size": "D",
-    "sizeUnit": "Drum",
-    "unit": "Drm"
-  },
-  {
-    "fullName": "EXCLUSIVE EMULSION-EP52 OFF WHITE-G",
-    "brand": "Exclusive",
-    "product": "Semi",
-    "code": "52",
-    "color": "Off White",
-    "size": "G",
-    "sizeUnit": "Gallon",
-    "unit": "Gln"
-  },
-  {
-    "fullName": "EXCLUSIVE EMULSION-EP52 OFF WHITE-Q",
-    "brand": "Exclusive",
-    "product": "Semi",
-    "code": "52",
-    "color": "Off White",
-    "size": "Q",
-    "sizeUnit": "Quarter",
-    "unit": "Qtr"
-  },
-  {
-    "fullName": "EXCLUSIVE EMULSION-EP53 ASH WHITE-D",
-    "brand": "Exclusive",
-    "product": "Semi",
-    "code": "53",
-    "color": "Ash White",
-    "size": "D",
-    "sizeUnit": "Drum",
-    "unit": "Drm"
-  },
-  {
-    "fullName": "EXCLUSIVE EMULSION-EP53 ASH WHITE-G",
-    "brand": "Exclusive",
-    "product": "Semi",
-    "code": "53",
-    "color": "Ash white",
-    "size": "G",
-    "sizeUnit": "Gallon",
-    "unit": "Gln"
-  },
-  {
-    "fullName": "EXCLUSIVE EMULSION-EP53 ASH WHITE-Q",
-    "brand": "Exclusive",
-    "product": "Semi",
-    "code": "53",
-    "color": "Ash white",
-    "size": "Q",
-    "sizeUnit": "Quarter",
-    "unit": "Qtr"
-  },
-  {
-    "fullName": "EXCLUSIVE EMULSION-EP54 LAVENDER WHITE-D",
-    "brand": "Exclusive",
-    "product": "Semi",
-    "code": "54",
-    "color": "LAVENDER WHITE",
-    "size": "D",
-    "sizeUnit": "Drum",
-    "unit": "Drm"
-  },
-  {
-    "fullName": "EXCLUSIVE EMULSION-EP55 BLACK-D",
-    "brand": "Exclusive",
-    "product": "Semi",
-    "code": "55",
-    "color": "Black",
-    "size": "D",
-    "sizeUnit": "Drum",
-    "unit": "Drm"
-  },
-  {
-    "fullName": "EXCLUSIVE EMULSION-EP56 GREY WHITE-D",
-    "brand": "Exclusive",
-    "product": "Semi",
-    "code": "56",
-    "color": "Grey White",
     "size": "D",
     "sizeUnit": "Drum",
     "unit": "Drm"
@@ -6020,39 +5900,9 @@
     "unit": "Qtr"
   },
   {
-    "fullName": "EXCLUSIVE PUTTY EP98-D",
-    "brand": "Exclusive",
-    "product": "Putty",
-    "code": "EP98",
-    "color": "white",
-    "size": "D",
-    "sizeUnit": "Drum",
-    "unit": "Drm"
-  },
-  {
-    "fullName": "EXCLUSIVE PUTTY EP98-G",
-    "brand": "Exclusive",
-    "product": "Putty",
-    "code": "EP98",
-    "color": "white",
-    "size": "G",
-    "sizeUnit": "Gallon",
-    "unit": "Gln"
-  },
-  {
-    "fullName": "EXCLUSIVE PUTTY EP98-Q",
-    "brand": "Exclusive",
-    "product": "Putty",
-    "code": "EP98",
-    "color": "white",
-    "size": "Q",
-    "sizeUnit": "Quarter",
-    "unit": "Qtr"
-  },
-  {
     "fullName": "EXCLUSIVE RED OXIDE PRIMER EX204-D",
     "brand": "Exclusive",
-    "product": "Primer",
+    "product": "ROP",
     "code": "EX204",
     "color": "Red Oxide",
     "size": "D",
@@ -6062,7 +5912,7 @@
   {
     "fullName": "EXCLUSIVE RED OXIDE PRIMER EX204-G",
     "brand": "Exclusive",
-    "product": "Primer",
+    "product": "ROP",
     "code": "EX204",
     "color": "Red Oxide",
     "size": "G",
@@ -6072,7 +5922,7 @@
   {
     "fullName": "EXCLUSIVE RED OXIDE PRIMER EX204-Q",
     "brand": "Exclusive",
-    "product": "Primer",
+    "product": "ROP",
     "code": "EX204",
     "color": "Red Oxide",
     "size": "Q",
@@ -6094,26 +5944,6 @@
     "brand": "Exclusive",
     "product": "Water Primer",
     "code": "EX202",
-    "color": "",
-    "size": "G",
-    "sizeUnit": "Gallon",
-    "unit": "Gln"
-  },
-  {
-    "fullName": "EXCLUSIVE WATER BASE PRIMER-D",
-    "brand": "Exclusive",
-    "product": "Water Primer",
-    "code": "",
-    "color": "",
-    "size": "D",
-    "sizeUnit": "Drum",
-    "unit": "Drm"
-  },
-  {
-    "fullName": "EXCLUSIVE WATER BASE PRIMER-G",
-    "brand": "Exclusive",
-    "product": "Water Primer",
-    "code": "",
     "color": "",
     "size": "G",
     "sizeUnit": "Gallon",
@@ -11058,16 +10888,6 @@
     "size": "Q",
     "sizeUnit": "Quarter",
     "unit": "Qtr"
-  },
-  {
-    "fullName": "EXTRA SEMI 03 5G WHITE-D",
-    "brand": "Extra",
-    "product": "Semi",
-    "code": "3",
-    "color": "5G White",
-    "size": "D",
-    "sizeUnit": "Drum",
-    "unit": "Drm"
   },
   {
     "fullName": "EXTRA SEMI 03 WHITE-D",
@@ -17782,7 +17602,7 @@
   {
     "fullName": "FAME DISTEMPER ASH WHITE-D",
     "brand": "Fame",
-    "product": "Distemper",
+    "product": "SEMI",
     "code": "",
     "color": "Ash White",
     "size": "D",
@@ -17792,7 +17612,7 @@
   {
     "fullName": "FAME DISTEMPER ASH WHITE-G",
     "brand": "Fame",
-    "product": "Distemper",
+    "product": "SEMI",
     "code": "",
     "color": "Ash White",
     "size": "G",
@@ -17802,7 +17622,7 @@
   {
     "fullName": "FAME DISTEMPER OFF WHITE-D",
     "brand": "Fame",
-    "product": "Distemper",
+    "product": "SEMI",
     "code": "",
     "color": "Off White",
     "size": "D",
@@ -17812,7 +17632,7 @@
   {
     "fullName": "FAME DISTEMPER OFF WHITE-G",
     "brand": "Fame",
-    "product": "Distemper",
+    "product": "SEMI",
     "code": "",
     "color": "Off White",
     "size": "G",
@@ -17822,7 +17642,7 @@
   {
     "fullName": "FAME DISTEMPER OFF WHITE-Q",
     "brand": "Fame",
-    "product": "Distemper",
+    "product": "SEMI",
     "code": "",
     "color": "Off White",
     "size": "Q",
@@ -17832,7 +17652,7 @@
   {
     "fullName": "FAME DISTEMPER WHITE-D",
     "brand": "Fame",
-    "product": "Distemper",
+    "product": "SEMI",
     "code": "",
     "color": "White",
     "size": "D",
@@ -17842,7 +17662,7 @@
   {
     "fullName": "FAME DISTEMPER WHITE-G",
     "brand": "Fame",
-    "product": "Distemper",
+    "product": "SEMI",
     "code": "",
     "color": "White",
     "size": "G",
@@ -17852,7 +17672,7 @@
   {
     "fullName": "FAME DISTEMPER WHITE-Q",
     "brand": "Fame",
-    "product": "Distemper",
+    "product": "SEMI",
     "code": "",
     "color": "White",
     "size": "Q",

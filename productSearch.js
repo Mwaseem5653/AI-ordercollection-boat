@@ -39,9 +39,10 @@ const SYNONYMS = {
     'LAPY':       'PUTTY',
     'LAAPI':      'PUTTY',
     'LAPI':       'PUTTY',
-    'DIST':       'DISTEMPER',
-    'DSIT':       'DISTEMPER',
-    'DISTEMPR':   'DISTEMPER',
+    'DIST':       'SEMI',
+    'DSIT':       'SEMI',
+    'DISTEMPR':   'SEMI',
+    'DISTEMPER':  'SEMI',
     'PRIMR':      'PRIMER',
     'THINER':     'THINNER',
     'THINR':      'THINNER',
@@ -368,6 +369,29 @@ function brandMatches(productBrandUpper, queryBrand) {
     return false;
 }
 
+// Levenshtein helper for fuzzy matching and code fluctuations
+function getLevenshtein(a, b) {
+    if (a.length === 0) return b.length;
+    if (b.length === 0) return a.length;
+    const matrix = [];
+    for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+    for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+    for (let i = 1; i <= b.length; i++) {
+        for (let j = 1; j <= a.length; j++) {
+            if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                matrix[i][j] = matrix[i - 1][j - 1];
+            } else {
+                matrix[i][j] = Math.min(
+                    matrix[i - 1][j - 1] + 1,
+                    matrix[i][j - 1] + 1,
+                    matrix[i - 1][j] + 1
+                );
+            }
+        }
+    }
+    return matrix[b.length][a.length];
+}
+
 // ── MAIN SEARCH ───────────────────────────────────────────────────────
 function findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken = false, sessionCache = null) {
     if (!nameOrCode || nameOrCode.length < 2) return 'NOT_IN_DATABASE';
@@ -479,15 +503,53 @@ function findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken = 
         let codeMatches = PRODUCTS.filter(p => (p.code || '').toUpperCase() === queryCode);
         const queryCodeNum = getNumericPart(queryCode);
         
+        // Exact integer match (e.g. "03" and "3")
+        if (codeMatches.length === 0 && queryCodeNum) {
+            const queryCodeVal = parseInt(queryCodeNum, 10);
+            codeMatches = PRODUCTS.filter(p => {
+                const pCodeNum = getNumericPart(p.code);
+                return pCodeNum && parseInt(pCodeNum, 10) === queryCodeVal;
+            });
+        }
+
+        // Brand filtering if brand is specified in query
         if (queryBrandForCode) {
             const exactBrandMatches = codeMatches.filter(p => brandMatches(p.brandUpper, queryBrandForCode));
-            if (exactBrandMatches.length === 0 && queryCodeNum) {
-                codeMatches = PRODUCTS.filter(p => getNumericPart(p.code) === queryCodeNum);
-            } else {
+            if (exactBrandMatches.length > 0) {
                 codeMatches = exactBrandMatches;
+            } else {
+                codeMatches = []; // If brand mismatch, do not accept wrong brand
             }
-        } else if (codeMatches.length === 0 && queryCodeNum) {
-            codeMatches = PRODUCTS.filter(p => getNumericPart(p.code) === queryCodeNum);
+        }
+
+        // ── CODE/NUMBER FLUCTUATION PATH ──
+        if (codeMatches.length === 0) {
+            console.log(`🔍 [CODE NOT FOUND - TRYING FLUCTUATION]: "${queryCode}"`);
+            
+            // Fluctuation 1: Absolute numeric difference <= 1 (e.g. 1066 vs 1067 / 1065, or 303 vs 302)
+            if (queryCodeNum) {
+                const queryCodeVal = parseInt(queryCodeNum, 10);
+                codeMatches = PRODUCTS.filter(p => {
+                    const pCodeNum = getNumericPart(p.code);
+                    if (!pCodeNum) return false;
+                    const pCodeVal = parseInt(pCodeNum, 10);
+                    return Math.abs(pCodeVal - queryCodeVal) <= 1;
+                });
+            }
+
+            // Fluctuation 2: Character/alphanumeric Levenshtein distance <= 1 (e.g. DD41 vs DD42)
+            if (codeMatches.length === 0) {
+                codeMatches = PRODUCTS.filter(p => {
+                    if (!p.code) return false;
+                    return getLevenshtein(p.code.toUpperCase(), queryCode.toUpperCase()) <= 1;
+                });
+            }
+
+            // Enforce brand matching on the code fluctuation candidates
+            if (codeMatches.length > 0 && queryBrandForCode) {
+                const brandFiltered = codeMatches.filter(p => brandMatches(p.brandUpper, queryBrandForCode));
+                codeMatches = brandFiltered;
+            }
         }
 
         if (codeMatches.length === 0) {
@@ -495,7 +557,7 @@ function findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken = 
             return 'NOT_IN_DATABASE';
         }
 
-        // Color filter in code path to resolve ambiguity (e.g. "2 ash,white" -> EXTRA SEMI 02 ASH WHITE)
+        // Color filter in code path to resolve ambiguity and enforce exact matches
         if (queryColorTokens.length > 0) {
             codeMatches.forEach(p => {
                 p._colorScore = scoreColor(p.colorUpper, queryColorTokens);
@@ -504,6 +566,9 @@ function findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken = 
             if (colorMatched.length > 0) {
                 const exactColorMatched = colorMatched.filter(p => p._colorScore === 100);
                 codeMatches = exactColorMatched.length > 0 ? exactColorMatched : colorMatched;
+            } else {
+                console.log(`❌ [STRICT CODE]: Color "${queryColorTokens.join(' ')}" does not match code candidates`);
+                return 'NOT_IN_DATABASE';
             }
         }
 
@@ -744,29 +809,30 @@ function runFuzzyFallback(nameOrCode, requestedSize, wantNoToken, sessionCache) 
     if (targetSuffix) {
         candidates = candidates.filter(p => p.size === targetSuffix);
     }
-    if (candidates.length === 0) return null;
 
-    function getLevenshtein(a, b) {
-        if (a.length === 0) return b.length;
-        if (b.length === 0) return a.length;
-        const matrix = [];
-        for (let i = 0; i <= b.length; i++) matrix[i] = [i];
-        for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
-        for (let i = 1; i <= b.length; i++) {
-            for (let j = 1; j <= a.length; j++) {
-                if (b.charAt(i - 1) === a.charAt(j - 1)) {
-                    matrix[i][j] = matrix[i - 1][j - 1];
-                } else {
-                    matrix[i][j] = Math.min(
-                        matrix[i - 1][j - 1] + 1,
-                        matrix[i][j - 1] + 1,
-                        matrix[i - 1][j] + 1
-                    );
-                }
-            }
-        }
-        return matrix[b.length][a.length];
+    // Extract query brand and colors to enforce exact matching in fuzzy path
+    const queryBrand = queryTokens.find(t => BRAND_SET.has(t) || MAJOR_GROUPS.has(t)) || null;
+    const PRODUCT_KEYWORDS = new Set([
+        'MATT','SEMI','PUTTY','PRIMER','ENAMEL','DISTEMPER','THINNER','GLOSS','GLOSSY',
+        'STAINLESS','SHIELD','WEATHER','WATER','OIL','WALLEX'
+    ]);
+    const queryColorTokens = queryTokens.filter(t =>
+        t !== queryBrand &&
+        !PRODUCT_KEYWORDS.has(t) &&
+        (COLOR_SET.has(t) || [...COLOR_SET].some(c => c.split(/\s+/).includes(t)))
+    );
+
+    // Enforce exact brand match
+    if (queryBrand) {
+        candidates = candidates.filter(p => brandMatches(p.brandUpper, queryBrand));
     }
+
+    // Enforce exact color match
+    if (queryColorTokens.length > 0) {
+        candidates = candidates.filter(p => scoreColor(p.colorUpper, queryColorTokens) > 0);
+    }
+
+    if (candidates.length === 0) return null;
 
     const scored = candidates.map(p => {
         let score = 0;
@@ -806,7 +872,9 @@ function runFuzzyFallback(nameOrCode, requestedSize, wantNoToken, sessionCache) 
     scored.sort((a, b) => b.score - a.score);
 
     const maxScore = scored[0] ? scored[0].score : 0;
-    const threshold = queryTokens.length * 6;
+    
+    // Strict threshold: raised to queryTokens.length * 10 to require high/maximum scoring
+    const threshold = queryTokens.length * 10;
 
     if (maxScore < threshold) return null;
 
@@ -849,7 +917,17 @@ function runFuzzyFallback(nameOrCode, requestedSize, wantNoToken, sessionCache) 
 
 function findBestProductMatchLocal(nameOrCode, requestedSize, wantNoToken = false, sessionCache = null) {
     const result = findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken, sessionCache);
+
+    // ── CRITICAL: Skip fuzzy fallback if query contained a code token ──
+    // If user gave a code (numeric or alphanumeric) that wasn't found,
+    // return NOT_IN_DATABASE immediately — do NOT guess via fuzzy.
     if (result === 'NOT_IN_DATABASE' && nameOrCode && nameOrCode.length >= 3) {
+        const queryTokensForCheck = tokenize(nameOrCode.trim());
+        const hadCodeToken = queryTokensForCheck.some(t => isCodeToken(t));
+        if (hadCodeToken) {
+            console.log(`🚫 [FUZZY SKIP]: Code detected in query "${nameOrCode}" — returning NOT_IN_DATABASE directly.`);
+            return 'NOT_IN_DATABASE';
+        }
         const fuzzy = runFuzzyFallback(nameOrCode, requestedSize, wantNoToken, sessionCache);
         if (fuzzy) return fuzzy;
     }

@@ -82,10 +82,6 @@ export default function Dashboard() {
     }
   }, [status, qr]);
 
-  const handleStart = () => {
-    fetch(`${API_BASE}/api/system/start`, { method: 'POST' });
-  };
-
   const handleClearConfirm = async () => {
     await fetch(`${API_BASE}/api/orders/clear`, { method: 'POST' });
     setOrders([]);
@@ -163,14 +159,6 @@ export default function Dashboard() {
             </button>
           )}
 
-          {backendStatus === 'disconnected' && (
-            <button 
-              onClick={handleStart} 
-              className="h-8 px-5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-[10px] font-black uppercase tracking-wider rounded-xl transition-all hover:scale-102 hover:shadow-lg hover:shadow-blue-500/10 cursor-pointer"
-            >
-              Start Agent
-            </button>
-          )}
         </div>
       </header>
 

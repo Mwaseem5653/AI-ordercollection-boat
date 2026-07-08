@@ -135,7 +135,7 @@ Enforces brand requirement for codes in multiple brands (e.g., DD41 exists in Al
 Enforces strict field matching for queries without codes (returns AMBIGUOUS if brand, product, or color is omitted and multiple database variants exist).
 Tool returns: MATCH / MULTIPLE_MATCHES / AMBIGUOUS / LOW_CONFIDENCE / SIZE_NOT_AVAILABLE / NOT_IN_DATABASE / NO_TOKEN_NOT_AVAILABLE`,
         parameters: z.object({
-            nameOrCode: z.string().describe("Product name ya code (e.g., 'EXTRA WHITE PUTTY', 'DA45'). Isme size ya quantity include mat karein."),
+            nameOrCode: z.string().describe("Product name, code, aur color (e.g., 'EXTRA WHITE PUTTY', 'DA45 RED'). AGAR user ne color mention kiya hai, toh use strictly is parameter me brand/product/code ke sath zaroor include karein. Isme size ya quantity include mat karein."),
             requestedSize: z.string().describe("Sirf requested size/unit (e.g., 'Gallon', 'Drum', 'Quarter', 'G', 'D', 'Q'). Quantity numbers (jaise '2' ya '5') isme include nahi hone chahiye."),
             wantNoToken: z.boolean().optional()
         }),
@@ -151,7 +151,7 @@ Enforces the same strict matching rules as findBestProductMatch.
 Returns array of {original, result} — result same format as findBestProductMatch (can be MATCH / MULTIPLE_MATCHES / etc.).`,
         parameters: z.object({
             items: z.array(z.object({
-                nameOrCode: z.string().describe("Product name ya code (e.g., 'EXTRA WHITE PUTTY', 'DA45'). Isme size ya quantity include mat karein."),
+                nameOrCode: z.string().describe("Product name, code, aur color (e.g., 'EXTRA WHITE PUTTY', 'DA45 RED'). AGAR user ne color mention kiya hai, toh use strictly is parameter me brand/product/code ke sath zaroor include karein. Isme size ya quantity include mat karein."),
                 requestedSize: z.string().describe("Sirf requested size/unit (e.g., 'Gallon', 'Drum', 'Quarter', 'G', 'D', 'Q'). Quantity numbers (jaise '2' ya '5') isme include nahi hone chahiye."),
                 wantNoToken: z.boolean().optional()
             }))
@@ -186,7 +186,7 @@ Reply ONLY in Roman Urdu. No greetings, no chit-chat, no English to users.
    - STRICT TOOL PARAMETER RULES:
      * Tool call karte waqt user ki quantity (e.g. 2, 5) ko size se ALAG karein.
      * "requestedSize" me sirf clean size unit (jaise 'Gallon', 'Drum', 'Quarter' ya 'G', 'D', 'Q') pass karein. Kabhi bhi quantity (jaise '2 gln') pass na karein.
-     * "nameOrCode" me sirf brand aur product name ya code pass karein. Isme size/quantity mix na karein.
+     * "nameOrCode" me brand, product name, code, aur color pass karein. AGAR user ne color mention kiya hai (jaise "red", "green", "magnolia", "ash white" etc.), toh use strictly "nameOrCode" parameter me zaroor include karein. Isme size ya quantity mix na karein.
      * CODES vs QUANTITIES (1 to 9): User ke message me single-digit numbers (1, 2, 3, 4, 5, 6, 7, 8, 9) product codes bhi ho sakte hain (jaise code '2') aur quantities bhi.
      * Quantity detection: Agar number ke baad size unit ho (e.g. '2 gln', '1 drum', '5 Qtr'), toh woh quantity hai. Is quantity number ko kabhi bhi 'nameOrCode' tool parameter me pass na karein.
      * Code detection: Agar number ke baad 'no', 'num', 'number', 'code', 'cod' ho (e.g. '2 no', 'code 3'), ya product identifier ho, toh woh product code hai. Is code number ko 'nameOrCode' tool parameter me zaroor pass karein!
@@ -224,7 +224,13 @@ Reply ONLY in Roman Urdu. No greetings, no chit-chat, no English to users.
    Brands: EXTRA, TREND, BOLD, BUDGET, EXCLUSIVE, FLUORESCENT, ALTRA, BONDEX -> auto correct  words mistakes before query
 If detail missing → ask with [Missing] placeholder.
 
-6. TRADING NAME: always mention in order in top or bottom of order or if missing ask from user..
+6. TRADING NAME rules:
+   - Agar aapne user se trading/shop name poocha hai, toh uske baad user jo bhi response deta hai (e.g., "Mubeen Traders", "Ali Paint Store"), use strictly "trading_name" samjhein aur verify karne ke liye tools me pass na karein.
+   - KABHI BHI trading name ko product match tools (findBestProductMatch / bulkVerifyProducts) me pass mat karein. Trading name koi product ya code nahi hota, isliye tool error default block karein.
+   - Shop/trading name identifiers: words like 'Traders', 'Paint', 'Store', 'Shop', 'Enterprises', 'Distributors', 'Co' etc. Agar user aisa koi naam bheje aur wo humare paint brands se match nahi karta, toh use strictly "trading_name" samjhein.
+   - Agar user ne order message ke sath hi trading name likh diya (same message mein) toh use directly use karo, alag se mat poochho.
+   - Agar user ne order confirm karne ke BAAD (next message mein) sirf trading name bheja (e.g. "ABC Traders", "Ali Paint") toh use trading name samjho aur ORDER_SUCCESS generate karo — is message ka SIRF EK hi reply karo (ORDER_SUCCESS JSON), double reply bilkul mat karo.
+   - CRITICAL: Jab trading name mil jaye aur sare items verified hoon, toh SIRF ORDER_SUCCESS output karo. Koi alag reply ya confirmation message mat bhejo uske sath.
 
 7. FINAL LIST — sirf tab dikhao jab SARE items MATCH ho jayein + trading name mil jaye.
    STRICT FORMATTING & SPACING INSTRUCTIONS:
@@ -234,6 +240,7 @@ If detail missing → ask with [Missing] placeholder.
    - Pipe (|) symbols ke dono taraf exact ek space hona chahiye: "[Product] | [Size] | [Qty]". 
      KABHI BHI bina space ke pipe ya multiple spaces ke sath pipe mat likhna (e.g., NOT "[Product]| [Size]" and NOT "[Product]  |  [Size]").
    - Item/Qty ke bilkul aakhir me koi extra trailing space nahi honi chahiye.
+   - CRITICAL: In [Product], you MUST use the exact, unmodified product name returned by the match tool (e.g., findBestProductMatch or bulkVerifyProducts), including the trailing size suffix (such as -D, -G, -Q, -DX, -GX, etc.). DO NOT remove or modify this suffix!
    
    Final List Format:
    1. [Product] | [Size] | [Qty]
@@ -246,7 +253,8 @@ If detail missing → ask with [Missing] placeholder.
 
 8. ON CONFIRMATION (YES/OK/HAAN/G/DONE/CONFIRM) — output ONLY:
    ORDER_SUCCESS: {"items":[{"product":"NAME","size":"Drum/Gallon/Quarter","quantity":N,"unit":"UNIT"}],"trading_name":"NAME"}
-   (unit must match tool response exactly)`;
+   (unit must match tool response exactly)
+   - CRITICAL: The "product" value in the JSON object MUST be the exact, unmodified product name returned by the match tool, including the trailing size suffix (e.g., "product": "EXTRA ENAMEL 66 BLACK-Q"). DO NOT strip the suffix under any circumstances!`;
 
 function createOrderAgent(sessionTools) {
     return new Agent({
