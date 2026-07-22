@@ -445,42 +445,6 @@ function findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken = 
     const queryTokens = tokenize(query).filter(t => t !== targetSuffix);
     if (queryTokens.length === 0) return 'NOT_IN_DATABASE';
 
-    // ── EXACT COLLAPSED MATCH ─────────────────────────────────────
-    const queryCollapsed = queryTokens.join('').replace(/[^A-Z0-9]/g, '');
-    const collapsedMatches = PRODUCTS.filter(p => p.collapsed === queryCollapsed);
-
-    if (collapsedMatches.length > 0) {
-        console.log(`🎯 [COLLAPSED MATCH]: Found ${collapsedMatches.length} matching candidate(s) for "${queryCollapsed}"`);
-        
-        // Only direct match if all candidates belong to the same product code family
-        const uniqueCodes = [...new Set(collapsedMatches.map(p => p.code).filter(Boolean))];
-        
-        let matchResult;
-        if (uniqueCodes.length <= 1) {
-            if (targetSuffix) {
-                matchResult = collapsedMatches.find(p => p.size === targetSuffix);
-                if (!matchResult) {
-                    const available = [...new Set(collapsedMatches.map(p => p.size).filter(Boolean))].join(', ');
-                    return `SIZE_NOT_AVAILABLE: ${collapsedMatches[0].baseName || collapsedMatches[0].fullName} | Available sizes: ${available} | Requested: ${targetSuffix}`;
-                }
-            } else {
-                if (collapsedMatches.length === 1) {
-                    matchResult = collapsedMatches[0];
-                }
-            }
-        } else {
-            console.log(`⚠️ [COLLAPSED MATCH AMBIGUOUS]: Multiple codes found: ${uniqueCodes.join(', ')}. Falling back to strict path.`);
-        }
-
-        if (matchResult) {
-            const finalName = wantNoTokenLocal ? `${matchResult.fullName}X` : matchResult.fullName;
-            const response  = `MATCH: ${finalName} | Unit: ${matchResult.unit}`;
-            if (sessionCache) sessionCache[cacheKey] = response;
-            console.log(`✅ [COLLAPSED MATCH SUCCESS]: ${response}`);
-            return response;
-        }
-    }
-
     const queryBrand = queryTokens.find(t => BRAND_SET.has(t) || MAJOR_GROUPS.has(t)) || null;
 
     const PRODUCT_KEYWORDS = new Set([
@@ -494,13 +458,13 @@ function findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken = 
         (COLOR_SET.has(t) || [...COLOR_SET].some(c => c.split(/\s+/).includes(t)))
     );
 
-    // ── CODE PATH ─────────────────────────────────────────────────
+    // ── CODE PATH (FIRST PRIORITY!) ────────────────────────────────
     const detectedCodeTokens = queryTokens.filter(t => isCodeToken(t));
 
     if (detectedCodeTokens.length > 0) {
         const actualCodeTokens = detectedCodeTokens.filter(t => CODE_SET.has(t));
         const queryCode        = actualCodeTokens.length > 0 ? actualCodeTokens[0] : detectedCodeTokens[0];
-        const queryBrandForCode = queryTokens.find(t => BRAND_SET.has(t) || MAJOR_GROUPS.has(t));
+        const queryBrandForCode = queryBrand;
 
         console.log(`🔒 [STRICT CODE]: code="${queryCode}" brand="${queryBrandForCode || 'ANY'}" size="${targetSuffix || 'ANY'}" noToken=${wantNoTokenLocal}`);
 
@@ -614,6 +578,42 @@ function findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken = 
         if (sessionCache) sessionCache[cacheKey] = response;
         console.log(`✅ [STRICT CODE]: ${response}`);
         return response;
+    }
+
+    // ── EXACT COLLAPSED MATCH ─────────────────────────────────────
+    const queryCollapsed = queryTokens.join('').replace(/[^A-Z0-9]/g, '');
+    const collapsedMatches = PRODUCTS.filter(p => p.collapsed === queryCollapsed);
+
+    if (collapsedMatches.length > 0) {
+        console.log(`🎯 [COLLAPSED MATCH]: Found ${collapsedMatches.length} matching candidate(s) for "${queryCollapsed}"`);
+        
+        // Only direct match if all candidates belong to the same product code family
+        const uniqueCodes = [...new Set(collapsedMatches.map(p => p.code).filter(Boolean))];
+        
+        let matchResult;
+        if (uniqueCodes.length <= 1) {
+            if (targetSuffix) {
+                matchResult = collapsedMatches.find(p => p.size === targetSuffix);
+                if (!matchResult) {
+                    const available = [...new Set(collapsedMatches.map(p => p.size).filter(Boolean))].join(', ');
+                    return `SIZE_NOT_AVAILABLE: ${collapsedMatches[0].baseName || collapsedMatches[0].fullName} | Available sizes: ${available} | Requested: ${targetSuffix}`;
+                }
+            } else {
+                if (collapsedMatches.length === 1) {
+                    matchResult = collapsedMatches[0];
+                }
+            }
+        } else {
+            console.log(`⚠️ [COLLAPSED MATCH AMBIGUOUS]: Multiple codes found: ${uniqueCodes.join(', ')}. Falling back to strict path.`);
+        }
+
+        if (matchResult) {
+            const finalName = wantNoTokenLocal ? `${matchResult.fullName}X` : matchResult.fullName;
+            const response  = `MATCH: ${finalName} | Unit: ${matchResult.unit}`;
+            if (sessionCache) sessionCache[cacheKey] = response;
+            console.log(`✅ [COLLAPSED MATCH SUCCESS]: ${response}`);
+            return response;
+        }
     }
 
     // ── AMBIGUITY CHECK ───────────────────────────────────────────

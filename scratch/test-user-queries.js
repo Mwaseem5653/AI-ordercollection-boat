@@ -4,14 +4,13 @@ const { findBestProductMatchLocal, loadProducts } = require('../productSearch.js
 loadProducts();
 
 const queries = [
-  { nameOrCode: '2', requestedSize: 'Gallon' },
+  { nameOrCode: 'trend t105', requestedSize: 'Gallon' },
+  { nameOrCode: 'extra enamel 303', requestedSize: 'Quarter' },
   { nameOrCode: '2 num', requestedSize: 'Gallon' },
-  { nameOrCode: 'extra semi ashwite', requestedSize: '' },
   { nameOrCode: 'extra semi ashwite', requestedSize: 'Gallon' },
-  { nameOrCode: 'extra semi ashwite', requestedSize: 'Quarter' },
 ];
 
-console.log('====== RUNNING PRODUCT SEARCH FOR USER QUERIES ======\n');
+console.log('====== RUNNING PRODUCT SEARCH WITH CODE PRIORITY ======\n');
 
 queries.forEach(({ nameOrCode, requestedSize }) => {
   console.log(`Query: "${nameOrCode}" | Size: "${requestedSize}"`);
