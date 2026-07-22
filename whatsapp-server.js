@@ -108,12 +108,17 @@ const chatSessions = {};
 
 
 
-const GROUP_NAMES = (process.env.WHATSAPP_GROUP_NAMES || '')
+const RAW_GROUP_NAMES = (process.env.WHATSAPP_GROUP_NAMES || '')
     .split(',')
-    .map(g => g.toLowerCase().replace(/[^a-z0-9]/g, '').trim())
+    .map(g => g.toLowerCase().trim())
+    .filter(Boolean);
+
+const GROUP_NAMES = RAW_GROUP_NAMES
+    .map(g => g.replace(/[^a-z0-9]/g, ''))
     .filter(Boolean);
 
 console.log('📋 [CONFIG]: Monitoring groups (cleaned):', GROUP_NAMES);
+console.log('📋 [CONFIG]: Monitoring groups (raw):', RAW_GROUP_NAMES);
 
 // ============================================================
 // PRODUCT SEARCH — Local JSON (Pinecone replaced)
@@ -270,6 +275,10 @@ function createOrderAgent(sessionTools) {
 // ============================================================
 const client = new Client({
     authStrategy: new LocalAuth(),
+    webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1043541377-alpha.html'
+    },
     puppeteer: {
         headless: true,
         args: [
@@ -316,35 +325,151 @@ client.on('disconnected', reason => {
 });
 
 // ============================================================
+// ============================================================
+// CUSTOM LIGHTWEIGHT FALLBACKS FOR ROBUST WHATSAPP INTERACTION
+// ============================================================
+async function getChatSafe(client, chatId) {
+    try {
+        if (!client || !client.pupPage) return null;
+        const chatData = await client.pupPage.evaluate(async (id) => {
+            if (typeof window === 'undefined' || !window.Store || !window.Store.Chat) {
+                return null;
+            }
+            let chat = window.Store.Chat.get(id);
+            if (!chat && typeof window.Store.Chat.find === 'function') {
+                try {
+                    chat = await window.Store.Chat.find(id);
+                } catch (e) {}
+            }
+            if (!chat) return null;
+            
+            // Extract group name from the most robust available properties in 2026 layout
+            const extractedName = chat.name || 
+                                  chat.formattedTitle || 
+                                  (chat.contact ? (chat.contact.name || chat.contact.formattedName) : '') || 
+                                  '';
+                                  
+            return {
+                name: extractedName,
+                isGroup: !!chat.isGroup
+            };
+        }, chatId);
+        return chatData;
+    } catch (err) {
+        console.warn(`⚠️ [CUSTOM CHAT EVAL FAIL] for ${chatId}:`, err.message || err);
+        return null;
+    }
+}
+
+async function getContactSafe(client, contactId) {
+    try {
+        if (!client || !client.pupPage) return null;
+        const contactData = await client.pupPage.evaluate((id) => {
+            if (typeof window === 'undefined' || !window.Store || !window.Store.Contact) {
+                return null;
+            }
+            const contact = window.Store.Contact.get(id);
+            if (!contact) return null;
+            return {
+                pushname: contact.pushname || contact.name || contact.formattedName || ''
+            };
+        }, contactId);
+        return contactData;
+    } catch (err) {
+        console.warn(`⚠️ [CUSTOM CONTACT EVAL FAIL] for ${contactId}:`, err.message || err);
+        return null;
+    }
+}
+
+async function getActualNumber(client, authorId) {
+    try {
+        if (!client) return null;
+        if (authorId && authorId.endsWith('@lid')) {
+            const resolved = await client.getContactLidAndPhone([authorId]);
+            if (resolved && resolved.length > 0 && resolved[0].pn) {
+                return resolved[0].pn;
+            }
+        }
+    } catch (err) {
+        console.warn(`⚠️ [getActualNumber fail] for ${authorId}:`, err.message || err);
+    }
+    return null;
+}
+
+// ============================================================
 // MESSAGE HANDLER
 // ============================================================
 client.on('message', async msg => {
+    let reply = async (text) => msg.reply(text);
+    let senderNumber;
+
     try {
         if (msg.from === 'status@broadcast' || msg.isStatus) return;
         if (!msg.from.endsWith('@g.us')) return;
 
-        const chat = await msg.getChat();
-        const contact = await msg.getContact();
-        const rawGroupName = chat.name ? chat.name : 'Unknown';
+        let chat = null;
+        try {
+            chat = await msg.getChat();
+        } catch (chatErr) {
+            console.warn(`⚠️ [msg.getChat() failed, trying custom fallback]:`, chatErr.message || chatErr);
+            const fallbackChat = await getChatSafe(client, msg.from);
+            if (fallbackChat) {
+                chat = {
+                    name: fallbackChat.name,
+                    isGroup: fallbackChat.isGroup,
+                    id: { _serialized: msg.from }
+                };
+            }
+        }
 
-        const pushName = contact.pushname || 'Customer';
-        const senderNumber = (msg.author || msg.from).split('@')[0];
+        let contact = null;
+        try {
+            contact = await msg.getContact();
+        } catch (contactErr) {
+            console.warn(`⚠️ [msg.getContact() failed, trying custom fallback]:`, contactErr.message || contactErr);
+            const authorId = msg.author || msg.from;
+            const fallbackContact = await getContactSafe(client, authorId);
+            if (fallbackContact) {
+                contact = {
+                    pushname: fallbackContact.pushname,
+                    id: { _serialized: authorId }
+                };
+            }
+        }
+
+        const rawGroupName = (chat && chat.name) ? chat.name : 'Unknown';
+        const pushName = (contact && contact.pushname) ? contact.pushname : 'Customer';
+        
+        const authorId = msg.author || msg.from;
+        senderNumber = authorId.split('@')[0];
+
+        // Resolve LID to actual phone number if possible
+        const resolvedNum = await getActualNumber(client, authorId);
+        if (resolvedNum) {
+            senderNumber = resolvedNum;
+        }
 
         // Centralized helper to tag the user in group replies
-        const reply = async (text) => {
+        reply = async (text) => {
             const prefix = `*@${pushName}:*\n`;
             return msg.reply(prefix + text);
         };
 
         console.log(`\n--- 📥 New Message ---`);
-        console.log(`From: ${contact.pushname || 'User'} (@${senderNumber})`);
-        console.log(`Group: "${rawGroupName}"`);
+        console.log(`From: ${pushName} (@${senderNumber})`);
+        console.log(`Group ID: "${msg.from}"`);
+        console.log(`Group Name: "${rawGroupName}"`);
         console.log(`Content: ${msg.body.substring(0, 50)}...`);
 
         if (msg.from.endsWith('@g.us')) {
             const cleanGroupName = rawGroupName.toLowerCase().replace(/[^a-z0-9]/g, '');
-            if (!GROUP_NAMES.includes(cleanGroupName)) {
-                console.log(`⏭️  [IGNORED]: Group "${rawGroupName}" not in whitelist.`);
+            const cleanGroupId = msg.from.toLowerCase().trim();
+            
+            const isNameWhitelisted = GROUP_NAMES.includes(cleanGroupName);
+            const isIdWhitelisted = RAW_GROUP_NAMES.includes(cleanGroupId) || RAW_GROUP_NAMES.some(allowed => cleanGroupId.includes(allowed));
+            
+            if (!isNameWhitelisted && !isIdWhitelisted) {
+                console.log(`⏭️  [IGNORED]: Group "${rawGroupName}" (${msg.from}) not in whitelist.`);
                 return;
             }
         }
@@ -596,13 +721,13 @@ ${captionHint}`
                     });
 
                     try {
-                        await writeToExcel(
-                            processedItems,
-                            contact.pushname || senderNumber,
-                            chat.name || 'Group',
-                            senderNumber,
-                            data.trading_name || 'UNKNOWN'
-                        );
+                       await writeToExcel(
+                           processedItems,
+                           pushName || senderNumber,
+                           rawGroupName || 'Group',
+                           senderNumber,
+                           data.trading_name || 'UNKNOWN'
+                       );
 
                         const replyText = output.split(/ORDER_SUCCESS:/)[0].trim();
                         if (replyText) await reply(replyText);
@@ -649,7 +774,7 @@ ${captionHint}`
         stats.pending = Object.keys(chatSessions).filter(k => chatSessions[k]?.history?.length > 0).length;
 
     } catch (err) {
-        console.error('🛑 [MESSAGE HANDLER ERROR]:', err.message);
+        console.error('🛑 [MESSAGE HANDLER ERROR]:', err);
         try {
             // Reset/clear session history to recover from errors/loops
             if (typeof senderNumber !== 'undefined' && chatSessions[senderNumber]) {

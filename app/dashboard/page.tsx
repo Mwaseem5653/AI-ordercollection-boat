@@ -70,15 +70,23 @@ export default function Dashboard() {
   }, [API_BASE]);
 
   useEffect(() => {
-    fetchData();
+    const timer = setTimeout(() => {
+      fetchData();
+    }, 0);
     const interval = setInterval(fetchData, 3000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(timer);
+      clearInterval(interval);
+    };
   }, [fetchData]);
 
   // Handle QR modal auto-open when qr_ready
   useEffect(() => {
     if (status === 'qr_ready' && qr) {
-      setIsQrOpen(true);
+      const timer = setTimeout(() => {
+        setIsQrOpen(true);
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [status, qr]);
 
@@ -351,7 +359,7 @@ export default function Dashboard() {
       </main>
 
       {/* QR Link Modal */}
-      <QRModal qr={qr} onClose={() => setIsQrOpen(false)} />
+      {isQrOpen && <QRModal qr={qr} onClose={() => setIsQrOpen(false)} />}
 
       {/* Wipe Confirmation Modal */}
       <DeleteModal 

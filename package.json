@@ -18,14 +18,16 @@
     "exceljs": "^3.4.0",
     "express": "^5.2.1",
     "fluent-ffmpeg": "^2.1.3",
-    "next": "^15.5.19",
+    "next": "^15.1.0",
+    "node": "^26.5.0",
     "openai": "^6.39.1",
     "openai-agents": "^1.1.0",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "whatsapp-web.js": "^1.34.7",
+    "whatsapp-web.js": "github:lindionez/whatsapp-web.js#feat/fix-_serialized-id-fallback",
+    "whatsapp.js": "^0.0.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
@@ -37,5 +39,11 @@
     "eslint-config-next": "16.2.1",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "allowScripts": {
+    "node@26.5.0": true,
+    "puppeteer@24.38.0": true,
+    "sharp@0.34.5": true,
+    "unrs-resolver@1.12.2": true
   }
 }
