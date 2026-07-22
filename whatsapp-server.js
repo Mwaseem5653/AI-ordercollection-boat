@@ -314,6 +314,7 @@ client.on('qr', qr => {
 });
 
 client.on('ready', () => {
+    if (clientStatus === 'connected') return;
     clientStatus = 'connected';
     console.log('✅ WhatsApp connected!');
     console.log('📡 Monitoring groups:', GROUP_NAMES.join(', ') || 'ALL DMs');

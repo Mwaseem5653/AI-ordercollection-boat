@@ -197,6 +197,10 @@ function tokenize(text) {
     cleanText = cleanText.replace(/\bW\/S\b|\bWS\b/g, 'WEATHER SHIELD');
     cleanText = cleanText.replace(/\bW\/B\b|\bWB\b/g, 'WATER BASE');
 
+    // Normalize color typos and synonyms
+    cleanText = cleanText.replace(/\bASHWITE\b|\bASHWT\b|\bASHUT\b|\bASHUL\b|\bASHWHITE\b|\bASHWHT\b/g, 'ASH WHITE');
+    cleanText = cleanText.replace(/\bOFFWHT\b|\bOFFWITE\b|\bOFFWHITE\b/g, 'OFF WHITE');
+
     const rawTokens = cleanText
         .replace(/[^A-Z0-9\s]/g, ' ')
         .split(/\s+/)
