@@ -404,7 +404,7 @@ function getLevenshtein(a, b) {
 
 // ── MAIN SEARCH ───────────────────────────────────────────────────────
 function findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken = false, sessionCache = null, phoneNumber = null) {
-    if (!nameOrCode || nameOrCode.length < 2) return 'NOT_IN_DATABASE';
+    if (!nameOrCode || nameOrCode.length < 1) return 'NOT_IN_DATABASE';
     if (PRODUCTS.length === 0) return 'NOT_IN_DATABASE';
 
     const query = nameOrCode.trim();
@@ -562,6 +562,26 @@ function findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken = 
                 const response  = `AMBIGUOUS: "${queryCode}" kai brands mein hai — konsa chahiye? ${brandList}${suffix}`;
                 console.log(`⚠️ [STRICT CODE]: ${response}`);
                 return response;
+            }
+        }
+
+        // Product type and keyword filtering/scoring when multiple matches exist for the same brand & code
+        const queryProductTokensForCode = queryTokens.filter(t => t !== queryBrandForCode && t !== queryCode && !queryColorTokens.includes(t));
+        if (codeMatches.length > 1 && queryProductTokensForCode.length > 0) {
+            codeMatches.forEach(p => {
+                let matchCount = 0;
+                const pProdTokens = p.productUpper.split(/\s+/).filter(Boolean);
+                for (const t of queryProductTokensForCode) {
+                    if (pProdTokens.includes(t) || p.fullNameTokenSet.has(t)) {
+                        matchCount++;
+                    }
+                }
+                p._codeProductScore = matchCount;
+            });
+            codeMatches.sort((a, b) => (b._codeProductScore || 0) - (a._codeProductScore || 0));
+            const maxProdScore = codeMatches[0]._codeProductScore;
+            if (maxProdScore > 0) {
+                codeMatches = codeMatches.filter(p => p._codeProductScore === maxProdScore);
             }
         }
 
