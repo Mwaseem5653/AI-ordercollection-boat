@@ -33,6 +33,7 @@ const STOP_WORDS = new Set([
 
 const SYNONYMS = {
     'EXTA':       'EXTRA',
+    'w':             'White',
     'XTRA':       'EXTRA',
     'FLORESCENT': 'FLUORESCENT',
     'FLURO':      'FLUORESCENT',
@@ -397,7 +398,7 @@ function getLevenshtein(a, b) {
 }
 
 // ── MAIN SEARCH ───────────────────────────────────────────────────────
-function findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken = false, sessionCache = null) {
+function findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken = false, sessionCache = null, phoneNumber = null) {
     if (!nameOrCode || nameOrCode.length < 2) return 'NOT_IN_DATABASE';
     if (PRODUCTS.length === 0) return 'NOT_IN_DATABASE';
 
@@ -464,7 +465,7 @@ function findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken = 
     if (detectedCodeTokens.length > 0) {
         const actualCodeTokens = detectedCodeTokens.filter(t => CODE_SET.has(t));
         const queryCode        = actualCodeTokens.length > 0 ? actualCodeTokens[0] : detectedCodeTokens[0];
-        const queryBrandForCode = queryBrand;
+        let queryBrandForCode = queryBrand;
 
         console.log(`🔒 [STRICT CODE]: code="${queryCode}" brand="${queryBrandForCode || 'ANY'}" size="${targetSuffix || 'ANY'}" noToken=${wantNoTokenLocal}`);
 
@@ -765,14 +766,15 @@ function findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken = 
 }
 
 // ── BULK VERIFY ───────────────────────────────────────────────────────
-function bulkVerifyProductsLocal(items, sessionCache = null) {
+function bulkVerifyProductsLocal(items, sessionCache = null, phoneNumber = null) {
     return items.map(item => ({
         original: item.nameOrCode,
         result: findBestProductMatchLocal(
             item.nameOrCode,
             item.requestedSize,
             item.wantNoToken || false,
-            sessionCache
+            sessionCache,
+            phoneNumber
         )
     }));
 }
@@ -919,8 +921,8 @@ function runFuzzyFallback(nameOrCode, requestedSize, wantNoToken, sessionCache) 
     return null;
 }
 
-function findBestProductMatchLocal(nameOrCode, requestedSize, wantNoToken = false, sessionCache = null) {
-    const result = findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken, sessionCache);
+function findBestProductMatchLocal(nameOrCode, requestedSize, wantNoToken = false, sessionCache = null, phoneNumber = null) {
+    const result = findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken, sessionCache, phoneNumber);
 
     // ── CRITICAL: Skip fuzzy fallback if query contained a code token ──
     // If user gave a code (numeric or alphanumeric) that wasn't found,
@@ -938,5 +940,9 @@ function findBestProductMatchLocal(nameOrCode, requestedSize, wantNoToken = fals
     return result;
 }
 
-module.exports = { findBestProductMatchLocal, bulkVerifyProductsLocal, loadProducts };
+module.exports = { 
+    findBestProductMatchLocal, 
+    bulkVerifyProductsLocal, 
+    loadProducts
+};
  

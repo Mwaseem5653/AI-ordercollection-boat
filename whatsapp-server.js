@@ -108,29 +108,27 @@ const chatSessions = {};
 
 
 
-const RAW_GROUP_NAMES = (process.env.WHATSAPP_GROUP_NAMES || '')
-    .split(',')
-    .map(g => g.toLowerCase().trim())
-    .filter(Boolean);
 
-const GROUP_NAMES = RAW_GROUP_NAMES
-    .map(g => g.replace(/[^a-z0-9]/g, ''))
+const GROUP_NAMES = (process.env.WHATSAPP_GROUP_NAMES || '')
+    .split(',')
+    .map(g => g.toLowerCase().replace(/[^a-z0-9]/g, '').trim())
     .filter(Boolean);
 
 console.log('📋 [CONFIG]: Monitoring groups (cleaned):', GROUP_NAMES);
-console.log('📋 [CONFIG]: Monitoring groups (raw):', RAW_GROUP_NAMES);
 
 // ============================================================
 // PRODUCT SEARCH — Local JSON (Pinecone replaced)
 // ============================================================
-function findBestProductMatch(nameOrCode, requestedSize, wantNoToken = false, sessionCache = null) {
-    return findBestProductMatchLocal(nameOrCode, requestedSize, wantNoToken, sessionCache);
+function findBestProductMatch(nameOrCode, requestedSize, wantNoToken = false, sessionCache = null, phoneNumber = null) {
+    return findBestProductMatchLocal(nameOrCode, requestedSize, wantNoToken, sessionCache, phoneNumber);
 }
 
 // ============================================================
 // TOOL FACTORY (per-session)
 // ============================================================
-function createTools(sessionCache) {
+function createTools(session) {
+    const sessionCache = session.verifiedProducts;
+
     const matchTool = tool({
         name: 'findBestProductMatch',
         description: `REQUIRED before every product confirmation.        
@@ -145,7 +143,7 @@ Tool returns: MATCH / MULTIPLE_MATCHES / AMBIGUOUS / LOW_CONFIDENCE / SIZE_NOT_A
             wantNoToken: z.boolean().optional()
         }),
         execute: async ({ nameOrCode, requestedSize, wantNoToken }) =>
-            findBestProductMatch(nameOrCode, requestedSize, wantNoToken, sessionCache)
+            findBestProductMatch(nameOrCode, requestedSize, wantNoToken, sessionCache, session.phoneNumber)
     });
 
     const bulkVerifyTool = tool({
@@ -162,12 +160,67 @@ Returns array of {original, result} — result same format as findBestProductMat
             }))
         }),
         execute: async ({ items }) => {
-            const results = bulkVerifyProductsLocal(items, sessionCache);
+            const results = bulkVerifyProductsLocal(items, sessionCache, session.phoneNumber);
             return JSON.stringify(results);
         }
     });
 
-    return [matchTool, bulkVerifyTool];
+    // ── submitOrder — replaces the old "ORDER_SUCCESS:" text-marker +
+    // regex-parsing approach. A schema-validated tool call can't be broken
+    // by the model adding stray words before/after the JSON, and it saves
+    // the order directly instead of round-tripping through free text.
+    const submitOrderTool = tool({
+        name: 'submitOrder',
+        description: `Call this ONLY once, when every item is a confirmed MATCH, the trading name is known, and the customer has confirmed (YES/OK/HAAN/G/DONE/CONFIRM). This directly saves the order — do not also try to output a JSON block yourself.`,
+        parameters: z.object({
+            items: z.array(z.object({
+                product: z.string().describe("Exact, unmodified product name returned by the match tool, including its trailing size suffix (e.g. 'EXTRA ENAMEL 66 BLACK-Q')."),
+                size: z.string().describe("Drum / Gallon / Quarter"),
+                quantity: z.number(),
+                unit: z.string().optional().describe("Leave blank if unsure — it will be filled in automatically from the verified match.")
+            })),
+            tradingName: z.string()
+        }),
+        execute: async ({ items, tradingName }) => {
+            try {
+                const processedItems = items.map(item => {
+                    let unit = item.unit;
+                    if (!unit) {
+                        const sz = (item.size || '').toLowerCase();
+                        const key = `${item.product.toLowerCase()}_${sz}_false`;
+                        const cached = sessionCache[key] || '';
+                        const unitMatch = cached.match(/Unit:\s*([^\|]+)/);
+                        if (unitMatch) unit = unitMatch[1].trim();
+                    }
+                    return {
+                        ...item,
+                        unit,
+                        isNTF: item.product.startsWith('user_raw_NTF_')
+                    };
+                });
+
+                await writeToExcel(
+                    processedItems,
+                    session.senderName,
+                    session.groupName || 'Group',
+                    session.phoneNumber,
+                    tradingName || 'UNKNOWN'
+                );
+
+                // Flag on the session so the message handler (which owns the
+                // WhatsApp reply + Excel context) knows to send the fixed
+                // confirmation and close the session — no regex parsing needed.
+                session.orderSubmitted = true;
+                stats.orders++;
+                return 'ORDER_SAVED_OK';
+            } catch (e) {
+                console.error('🛑 [SUBMIT ORDER TOOL ERROR]:', e.message);
+                return 'ORDER_SAVE_FAILED';
+            }
+        }
+    });
+
+    return [matchTool, bulkVerifyTool, submitOrderTool];
 }
 
 // ============================================================
@@ -192,19 +245,27 @@ Reply ONLY in Roman Urdu. No greetings, no chit-chat, no English to users.
      * Tool call karte waqt user ki quantity (e.g. 2, 5) ko size se ALAG karein.
      * "requestedSize" me sirf clean size unit (jaise 'Gallon', 'Drum', 'Quarter' ya 'G', 'D', 'Q') pass karein. Kabhi bhi quantity (jaise '2 gln') pass na karein.
      * "nameOrCode" me brand, product name, code, aur color pass karein. AGAR user ne color mention kiya hai (jaise "red", "green", "magnolia", "ash white" etc.), toh use strictly "nameOrCode" parameter me zaroor include karein. Isme size ya quantity mix na karein.
-     * CODES vs QUANTITIES (1 to 9): User ke message me single-digit numbers (1, 2, 3, 4, 5, 6, 7, 8, 9) product codes bhi ho sakte hain (jaise code '2') aur quantities bhi.
-     * Quantity detection: Agar number ke baad size unit ho (e.g. '2 gln', '1 drum', '5 Qtr'), toh woh quantity hai. Is quantity number ko kabhi bhi 'nameOrCode' tool parameter me pass na karein.
-     * Code detection: Agar number ke baad 'no', 'num', 'number', 'code', 'cod' ho (e.g. '2 no', 'code 3'), ya product identifier ho, toh woh product code hai. Is code number ko 'nameOrCode' tool parameter me zaroor pass karein!
-     * Example: Agar user "2 no k 2 gln" bole, toh pehla "2" code hai, aur doosra "2" quantity hai. Tool me 'nameOrCode' = "2" (ya brand ke sath 'brand 2') aur 'requestedSize' = "Gallon" pass karein.
+     * CODE vs QUANTITY — simple rule: a number immediately followed by a size
+       word ('gln','drum','qtr','g','d','q') is a QUANTITY, never a code.
+       A number followed by 'no'/'code'/'number', or standing alone as a
+       product identifier, is a CODE and belongs in 'nameOrCode'.
+     * Worked examples:
+       - "2 no k 2 gln"  -> code="2", quantity=2, size=Gallon
+       - "bold 55 2 drum" -> code="55" (belongs with brand), quantity=2, size=Drum
+       - "extra semi white 3 gln" -> no code, quantity=3, size=Gallon
+     * If genuinely unsure whether a number is a code or a quantity, ask the
+       customer in one short line instead of guessing — a wrong guess here
+       causes silent order errors.
 
-3. STRICT AUTO-CORRECTIONS FOR BRANDS & PRODUCTS BEFORE TOOL CALL:
-   - User agar brand ya product ki spelling me koi ghalti ya typo kare, toh tool call karne se pehle use hamare list ke standard names se match kar ke strictly correct karein.
-   - Valid Brands: EXTRA, TREND, BOLD, BUDGET, EXCLUSIVE, FLUORESCENT, ALTRA, BONDEX.
-     * Typos: exta/xtra/exra -> EXTRA | trnd/trand -> TREND | bod/bld -> BOLD | bugt/budgt -> BUDGET | excl/exclsv/exclsive -> EXCLUSIVE | flore/fluro/florescent -> FLUORESCENT | altra/alta -> ALTRA | bond/bndx -> BONDEX
-   - Valid Products: SEMI, ROP, Stainless, Enamel, Oil Matt, Weather Sheild, Primer, Water Primer, Oil Primer, Matt,Water Matt, Oil Matt, Putty.
-     * Typos: lapi/laphy/puti -> Putty | emulsion/semi/platic -> SEMI | enaml/enml -> Enamel | primr/sealer/base -> Primer | dist/distempr -> DISTEMPER | thiner/thinr -> THINNER | sheild/shield/weather -> Weather Sheild | w -> white | Water Matt -> Stainless | if only Matt -> Matt
-   - Strict rule: Brand aur product name standard spelling ke sath hi tool parameter 'nameOrCode' me pass hone chahiye. 
-   - Strict rule product name k bath jo words likhe likhe ho wo color hone Examle Extra W/S Mangolia -> Mangolia color mn search hoga  
+3. SPELLING / TYPOS — DO NOT correct these yourself:
+   - The product search tool already normalizes brand, product, and color spelling
+     (typos, shorthand, common misspellings). Pass the customer's words through
+     mostly as-is inside "nameOrCode" — just keep brand + product + code + color
+     together, and keep size/quantity OUT of "nameOrCode".
+   - Example: customer writes "xtra w/s mangolia 2g" ->
+     nameOrCode = "extra weather shield mangolia", requestedSize = "Gallon".
+     (The tool will fix "mangolia"-type typos on its own — you do not need a
+     correction table for this.)
 
 4. TOOL RESULTS & CORRECTIONS — Har issue wale item ko bilkul saaf aur structured format (Roman Urdu) me dikhayein:
    - Use bold numbering for items with issues (e.g., "*Item 1:*", "*Item 2:*").
@@ -226,18 +287,34 @@ Reply ONLY in Roman Urdu. No greetings, no chit-chat, no English to users.
 5. ORDER FORMAT expected from user:
    BRAND | CODE or PRODUCT | COLOR | SIZE(Drum/Gallon/Quarter) | QTY
    e.g. "Bold 1066 2g" or "Bold semi white 2g"
-   Brands: EXTRA, TREND, BOLD, BUDGET, EXCLUSIVE, FLUORESCENT, ALTRA, BONDEX -> auto correct  words mistakes before query
-If detail missing → ask with [Missing] placeholder.
+   Brands: EXTRA, TREND, BOLD, BUDGET, EXCLUSIVE, FLUORESCENT, ALTRA, BONDEX → auto correct word mistakes before query
+
+   MISSING INFO — KABHI BHI assume ya guess mat karo. Agar koi zaroori field missing ho:
+
+   ❌ QTY missing:
+      → User se seedha poochein: "*Qty batayein:* Aapko [Product Name] ki kitni quantity chahiye?"
+      → Qty ke bina order proceed NAHI karna.
+
+   ❌ BRAND missing (aur code ambiguous ho):
+      → Tool AMBIGUOUS return karega. Phir user ko clearly likhein:
+        "*Brand batayein:* [Code] kai brands mein available hai — konsa chahiye?"
+        Aur options list karein (e.g., "1. Altra  2. Hi Look")
+      → Brand confirm hone ke baad hi aage barho.
+
+   ❌ SIZE missing:
+      → User se poochein: "*Size batayein:* [Product] ke liye kaunsa size chahiye? (Gallon / Drum / Quarter)"
+
+   Rule: Ek message mein sirf ek cheez poochein. Agar qty bhi missing hai aur brand bhi, pehle brand poochein phir qty.
 
 6. TRADING NAME rules:
    - Agar aapne user se trading/shop name poocha hai, toh uske baad user jo bhi response deta hai (e.g., "Mubeen Traders", "Ali Paint Store"), use strictly "trading_name" samjhein aur verify karne ke liye tools me pass na karein.
    - KABHI BHI trading name ko product match tools (findBestProductMatch / bulkVerifyProducts) me pass mat karein. Trading name koi product ya code nahi hota, isliye tool error default block karein.
    - Shop/trading name identifiers: words like 'Traders', 'Paint', 'Store', 'Shop', 'Enterprises', 'Distributors', 'Co' etc. Agar user aisa koi naam bheje aur wo humare paint brands se match nahi karta, toh use strictly "trading_name" samjhein.
    - Agar user ne order message ke sath hi trading name likh diya (same message mein) toh use directly use karo, alag se mat poochho.
-   - Agar user ne order confirm karne ke BAAD (next message mein) sirf trading name bheja (e.g. "ABC Traders", "Ali Paint") toh use trading name samjho aur ORDER_SUCCESS generate karo — is message ka SIRF EK hi reply karo (ORDER_SUCCESS JSON), double reply bilkul mat karo.
-   - CRITICAL: Jab trading name mil jaye aur sare items verified hoon, toh SIRF ORDER_SUCCESS output karo. Koi alag reply ya confirmation message mat bhejo uske sath.
+   - Agar user ne order confirm karne ke BAAD (next message mein) sirf trading name bheja (e.g. "ABC Traders", "Ali Paint") toh use trading name samjho aur turant "submitOrder" tool call karo.
+   - CRITICAL: Jab trading name mil jaye aur sare items verified hoon, sirf "submitOrder" tool call karo — koi alag JSON ya extra confirmation text mat likho uske sath usi turn mein.
 
-7. FINAL LIST — sirf tab dikhao jab SARE items MATCH ho jayein + trading name mil jaye.
+7. FINAL LIST — sirf tab dikhao jab SARE items MATCH ho jayein + trading name mil jaye agher trading name nahn to phele users se confirm karna h.
    STRICT FORMATTING & SPACING INSTRUCTIONS:
    - Final list ka format bilkul fixed aur uniform hona chahiye. Space errors bilkul nahi honi chahiye.
    - Har line ke start me koi bhi extra space ya tab nahi hona chahiye. Direct serial number se start karein (e.g., "1. ", "2. ").
@@ -256,10 +333,18 @@ If detail missing → ask with [Missing] placeholder.
    
    Phir poochein: "Yeh list check karlein, theek hai toh YES likh kar confirm kardein. ✅"
 
-8. ON CONFIRMATION (YES/OK/HAAN/G/DONE/CONFIRM) — output ONLY:
-   ORDER_SUCCESS: {"items":[{"product":"NAME","size":"Drum/Gallon/Quarter","quantity":N,"unit":"UNIT"}],"trading_name":"NAME"}
-   (unit must match tool response exactly)
-   - CRITICAL: The "product" value in the JSON object MUST be the exact, unmodified product name returned by the match tool, including the trailing size suffix (e.g., "product": "EXTRA ENAMEL 66 BLACK-Q"). DO NOT strip the suffix under any circumstances!`;
+8. ON CONFIRMATION (YES/OK/HAAN/G/DONE/CONFIRM) — call the "submitOrder" tool.
+   - Pass each item's exact, unmodified product name as returned by the match
+     tool, including the trailing size suffix (e.g. "EXTRA ENAMEL 66 BLACK-Q").
+     DO NOT strip or modify this suffix.
+   - Pass the trading name you collected.
+   - After the tool returns success, reply with ONE short Roman Urdu line
+     confirming the saved order (e.g. list the items briefly). Do not repeat
+     the tool call, and do not fabricate a JSON block yourself — the tool
+     call itself is what saves the order.
+   - If the tool returns a failure result, tell the customer there was a
+     technical issue and to please resend in a moment — do not retry the
+     tool call more than once in the same turn.`;
 
 function createOrderAgent(sessionTools) {
     return new Agent({
@@ -273,12 +358,17 @@ function createOrderAgent(sessionTools) {
 // ============================================================
 // WHATSAPP CLIENT
 // ============================================================
+// Crash-proofing against unhandled EBUSY/resource locked rejections in Puppeteer/Windows
+process.on('unhandledRejection', (reason, promise) => {
+    if (reason && reason.message && reason.message.includes('EBUSY')) {
+        console.warn('⚠️ [EBUSY LOCK BYPASS]: Ignored asynchronous file lock warning during Puppeteer lifecycle.');
+        return;
+    }
+    console.error('🛑 Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 const client = new Client({
     authStrategy: new LocalAuth(),
-    webVersionCache: {
-        type: 'remote',
-        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1043541377-alpha.html'
-    },
     puppeteer: {
         headless: true,
         args: [
@@ -302,6 +392,8 @@ const client = new Client({
             '--safebrowsing-disable-auto-update',
             '--disk-cache-size=0',           // Cache permission errors fix
             '--media-cache-size=0',
+            '--disable-features=FirstPartySets', // Disable features writing to disk asynchronously
+            '--disable-features=PrivacySandboxSettings4',
         ]
     }
 });
@@ -314,7 +406,7 @@ client.on('qr', qr => {
 });
 
 client.on('ready', () => {
-    if (clientStatus === 'connected') return;
+    if (clientStatus === 'connected') return; // Avoid double logging
     clientStatus = 'connected';
     console.log('✅ WhatsApp connected!');
     console.log('📡 Monitoring groups:', GROUP_NAMES.join(', ') || 'ALL DMs');
@@ -326,151 +418,24 @@ client.on('disconnected', reason => {
 });
 
 // ============================================================
-// ============================================================
-// CUSTOM LIGHTWEIGHT FALLBACKS FOR ROBUST WHATSAPP INTERACTION
-// ============================================================
-async function getChatSafe(client, chatId) {
-    try {
-        if (!client || !client.pupPage) return null;
-        const chatData = await client.pupPage.evaluate(async (id) => {
-            if (typeof window === 'undefined' || !window.Store || !window.Store.Chat) {
-                return null;
-            }
-            let chat = window.Store.Chat.get(id);
-            if (!chat && typeof window.Store.Chat.find === 'function') {
-                try {
-                    chat = await window.Store.Chat.find(id);
-                } catch (e) {}
-            }
-            if (!chat) return null;
-            
-            // Extract group name from the most robust available properties in 2026 layout
-            const extractedName = chat.name || 
-                                  chat.formattedTitle || 
-                                  (chat.contact ? (chat.contact.name || chat.contact.formattedName) : '') || 
-                                  '';
-                                  
-            return {
-                name: extractedName,
-                isGroup: !!chat.isGroup
-            };
-        }, chatId);
-        return chatData;
-    } catch (err) {
-        console.warn(`⚠️ [CUSTOM CHAT EVAL FAIL] for ${chatId}:`, err.message || err);
-        return null;
-    }
-}
-
-async function getContactSafe(client, contactId) {
-    try {
-        if (!client || !client.pupPage) return null;
-        const contactData = await client.pupPage.evaluate((id) => {
-            if (typeof window === 'undefined' || !window.Store || !window.Store.Contact) {
-                return null;
-            }
-            const contact = window.Store.Contact.get(id);
-            if (!contact) return null;
-            return {
-                pushname: contact.pushname || contact.name || contact.formattedName || ''
-            };
-        }, contactId);
-        return contactData;
-    } catch (err) {
-        console.warn(`⚠️ [CUSTOM CONTACT EVAL FAIL] for ${contactId}:`, err.message || err);
-        return null;
-    }
-}
-
-async function getActualNumber(client, authorId) {
-    try {
-        if (!client) return null;
-        if (authorId && authorId.endsWith('@lid')) {
-            const resolved = await client.getContactLidAndPhone([authorId]);
-            if (resolved && resolved.length > 0 && resolved[0].pn) {
-                return resolved[0].pn;
-            }
-        }
-    } catch (err) {
-        console.warn(`⚠️ [getActualNumber fail] for ${authorId}:`, err.message || err);
-    }
-    return null;
-}
-
-// ============================================================
 // MESSAGE HANDLER
 // ============================================================
 client.on('message', async msg => {
-    let reply = async (text) => msg.reply(text);
-    let senderNumber;
-
     try {
         if (msg.from === 'status@broadcast' || msg.isStatus) return;
         if (!msg.from.endsWith('@g.us')) return;
 
-        let chat = null;
-        try {
-            chat = await msg.getChat();
-        } catch (chatErr) {
-            console.warn(`⚠️ [msg.getChat() failed, trying custom fallback]:`, chatErr.message || chatErr);
-            const fallbackChat = await getChatSafe(client, msg.from);
-            if (fallbackChat) {
-                chat = {
-                    name: fallbackChat.name,
-                    isGroup: fallbackChat.isGroup,
-                    id: { _serialized: msg.from }
-                };
-            }
-        }
+        const chat = await msg.getChat();
+        const contact = await msg.getContact();
+        const rawGroupName = chat.name ? chat.name : 'Unknown';
 
-        let contact = null;
-        try {
-            contact = await msg.getContact();
-        } catch (contactErr) {
-            console.warn(`⚠️ [msg.getContact() failed, trying custom fallback]:`, contactErr.message || contactErr);
-            const authorId = msg.author || msg.from;
-            const fallbackContact = await getContactSafe(client, authorId);
-            if (fallbackContact) {
-                contact = {
-                    pushname: fallbackContact.pushname,
-                    id: { _serialized: authorId }
-                };
-            }
-        }
-
-        const rawGroupName = (chat && chat.name) ? chat.name : 'Unknown';
-        const pushName = (contact && contact.pushname) ? contact.pushname : 'Customer';
-        
-        const authorId = msg.author || msg.from;
-        senderNumber = authorId.split('@')[0];
-
-        // Resolve LID to actual phone number if possible
-        const resolvedNum = await getActualNumber(client, authorId);
-        if (resolvedNum) {
-            senderNumber = resolvedNum;
-        }
-
-        // Centralized helper to tag the user in group replies
-        reply = async (text) => {
-            const prefix = `*@${pushName}:*\n`;
-            return msg.reply(prefix + text);
-        };
-
-        console.log(`\n--- 📥 New Message ---`);
-        console.log(`From: ${pushName} (@${senderNumber})`);
-        console.log(`Group ID: "${msg.from}"`);
-        console.log(`Group Name: "${rawGroupName}"`);
-        console.log(`Content: ${msg.body.substring(0, 50)}...`);
+        const pushName = contact.pushname || 'Customer';
+        const senderNumber = (msg.author || msg.from).split('@')[0];
 
         if (msg.from.endsWith('@g.us')) {
             const cleanGroupName = rawGroupName.toLowerCase().replace(/[^a-z0-9]/g, '');
-            const cleanGroupId = msg.from.toLowerCase().trim();
-            
-            const isNameWhitelisted = GROUP_NAMES.includes(cleanGroupName);
-            const isIdWhitelisted = RAW_GROUP_NAMES.includes(cleanGroupId) || RAW_GROUP_NAMES.some(allowed => cleanGroupId.includes(allowed));
-            
-            if (!isNameWhitelisted && !isIdWhitelisted) {
-                console.log(`⏭️  [IGNORED]: Group "${rawGroupName}" (${msg.from}) not in whitelist.`);
+            if (!GROUP_NAMES.includes(cleanGroupName)) {
+                console.log(`⏭️  [IGNORED]: Group "${rawGroupName}" not in whitelist.`);
                 return;
             }
         }
@@ -480,59 +445,84 @@ client.on('message', async msg => {
             return;
         }
 
-        // ── EXTRACT MESSAGE BODY ──────────────────────────────────────
-        const caption = msg.body?.trim() || '';
-        let body = caption;
+        console.log(`\n--- 📥 New Message Event ---`);
+        console.log(`From: ${contact.pushname || 'User'} (@${senderNumber})`);
+        console.log(`Group: "${rawGroupName}"`);
+        console.log(`Content: ${msg.body.substring(0, 50)}...`);
 
-        if (msg.hasMedia) {
-            try {
-                const media = await msg.downloadMedia();
-                if (media) {
-                    const isAudio = media.mimetype.startsWith('audio') || media.mimetype.includes('ogg');
-                    const isImage = media.mimetype.startsWith('image');
+        // Process message immediately — no buffering/debounce
+        await handleBufferedMessages([msg], senderNumber, pushName, rawGroupName);
 
-                    if (isAudio) {
-                        console.log(`🎙️  [VOICE]: Transcribing from ${senderNumber}...`);
-                        const res = await getNativeModel().generateContent([
-                            { text: 'Transcribe this audio message exactly. Return only the transcribed text, nothing else.' },
-                            { inlineData: { data: media.data, mimeType: media.mimetype } }
-                        ]);
-                        body = res.response.text().trim();
+    } catch (err) {
+        console.error('🛑 [EVENT RECEIVE ERROR]:', err && err.stack ? err.stack : err);
+    }
+});
 
-                    } else if (isImage) {
-                        console.log(`📸 [IMAGE]: Processing from ${senderNumber}... caption="${caption || 'none'}"`);
 
-                        const captionHint = caption
-                            ? `The user also wrote this caption with the image: "${caption}". Use both the image and caption together.`
-                            : '';
+async function handleBufferedMessages(messages, senderNumber, pushName, rawGroupName) {
+    const lastMsg = messages[messages.length - 1];
+    
+    // Centralized helper to tag the user in group replies
+    const reply = async (text) => {
+        const prefix = `*@${pushName}:*\n`;
+        return lastMsg.reply(prefix + text);
+    };
 
-                        const schema = {
-                            type: 'OBJECT',
-                            properties: {
-                                trading_name: { type: 'STRING', description: 'Shop/Trading name mentioned in the image if any' },
-                                items: {
-                                    type: 'ARRAY',
-                                    description: 'List of order items extracted from the image',
+    try {
+        let combinedBodyParts = [];
+        for (const msg of messages) {
+            const caption = msg.body?.trim() || '';
+            let body = caption;
+
+            if (msg.hasMedia) {
+                try {
+                    const media = await msg.downloadMedia();
+                    if (media) {
+                        const isAudio = media.mimetype.startsWith('audio') || media.mimetype.includes('ogg');
+                        const isImage = media.mimetype.startsWith('image');
+
+                        if (isAudio) {
+                            console.log(`🎙️  [VOICE]: Transcribing from ${senderNumber}...`);
+                            const res = await getNativeModel().generateContent([
+                                { text: 'Transcribe this audio message exactly. Return only the transcribed text, nothing else.' },
+                                { inlineData: { data: media.data, mimeType: media.mimetype } }
+                            ]);
+                            body = res.response.text().trim();
+
+                        } else if (isImage) {
+                            console.log(`📸 [IMAGE]: Processing from ${senderNumber}... caption="${caption || 'none'}"`);
+
+                            const captionHint = caption
+                                ? `The user also wrote this caption with the image: "${caption}". Use both the image and caption together.`
+                                : '';
+
+                            const schema = {
+                                type: 'OBJECT',
+                                properties: {
+                                    trading_name: { type: 'STRING', description: 'Shop/Trading name mentioned in the image if any' },
                                     items: {
-                                        type: 'OBJECT',
-                                        properties: {
-                                            product: { type: 'STRING', description: 'Product name or code, including brand and color if found' },
-                                            size: { type: 'STRING', description: 'Size unit (e.g. Gallon, Drum, Quarter)' },
-                                            quantity: { type: 'NUMBER', description: 'Quantity of pieces' }
-                                        },
-                                        required: ['product']
+                                        type: 'ARRAY',
+                                        description: 'List of order items extracted from the image',
+                                        items: {
+                                            type: 'OBJECT',
+                                            properties: {
+                                                product: { type: 'STRING', description: 'Product name or code, including brand and color if found' },
+                                                size: { type: 'STRING', description: 'Size unit (e.g. Gallon, Drum, Quarter)' },
+                                                quantity: { type: 'NUMBER', description: 'Quantity of pieces' }
+                                            },
+                                            required: ['product']
+                                        }
                                     }
                                 }
-                            }
-                        };
+                            };
 
-                        const res = await getNativeModel().generateContent({
-                            contents: [
-                                {
-                                    role: 'user',
-                                    parts: [
-                                        {
-                                             text: `This is a handwritten order slip/image from a Paint & Hardware wholesale shop.
+                            const res = await getNativeModel().generateContent({
+                                contents: [
+                                    {
+                                        role: 'user',
+                                        parts: [
+                                            {
+                                                 text: `This is a handwritten order slip/image from a Paint & Hardware wholesale shop.
 CRITICAL LAYOUT & QUANTITY EXTRACTION RULES:
 
 1. INDEPENDENT COLUMN SEGREGATION:
@@ -581,70 +571,76 @@ CRITICAL LAYOUT & QUANTITY EXTRACTION RULES:
 
 Extract all items into the JSON schema, splitting shorthand entries into separate items (one item per size). Do not include zero-quantity items.
 ${captionHint}`
-                                        },
-                                        { inlineData: { data: media.data, mimeType: media.mimetype } }
-                                    ]
-                                }
-                            ],
-                            generationConfig: {
-                                responseMimeType: 'application/json',
-                                responseSchema: schema
-                            }
-                        });
+                                             },
+                                             { inlineData: { data: media.data, mimeType: media.mimetype } }
+                                         ]
+                                     }
+                                 ],
+                                 generationConfig: {
+                                     responseMimeType: 'application/json',
+                                     responseSchema: schema
+                                 }
+                             });
 
-                        const imageText = res.response.text().trim();
-                        try {
-                            const parsed = JSON.parse(imageText);
-                            let formatted = '';
-                            if (parsed.trading_name) {
-                                formatted += `Trading Name: ${parsed.trading_name}\n`;
+                            const imageText = res.response.text().trim();
+                            try {
+                                const parsed = JSON.parse(imageText);
+                                let formatted = '';
+                                if (parsed.trading_name) {
+                                    formatted += `Trading Name: ${parsed.trading_name}\n`;
+                                }
+                                if (parsed.items && parsed.items.length > 0) {
+                                    formatted += `Items:\n`;
+                                    parsed.items.forEach(item => {
+                                        const qty = item.quantity || 1;
+                                        const size = item.size ? ` ${item.size}` : '';
+                                        formatted += `- ${item.product}${size} | Qty: ${qty}\n`;
+                                    });
+                                }
+                                body = formatted.trim() || caption;
+                                if (caption && !body.toLowerCase().includes(caption.toLowerCase())) {
+                                    body = `${body}\nUser note: ${caption}`;
+                                }
+                            } catch (parseErr) {
+                                console.error('🛑 [IMAGE JSON PARSE ERROR]:', parseErr.message);
+                                body = imageText || caption;
                             }
-                            if (parsed.items && parsed.items.length > 0) {
-                                formatted += `Items:\n`;
-                                parsed.items.forEach(item => {
-                                    const qty = item.quantity || 1;
-                                    const size = item.size ? ` ${item.size}` : '';
-                                    formatted += `- ${item.product}${size} | Qty: ${qty}\n`;
-                                });
-                            }
-                            body = formatted.trim() || caption;
-                            if (caption && !body.toLowerCase().includes(caption.toLowerCase())) {
-                                body = `${body}\nUser note: ${caption}`;
-                            }
-                        } catch (parseErr) {
-                            console.error('🛑 [IMAGE JSON PARSE ERROR]:', parseErr.message);
-                            body = imageText || caption;
+                            console.log(`🖼️  [IMAGE EXTRACTED FOR AI]:\n${body}`);
                         }
-                        console.log(`🖼️  [IMAGE EXTRACTED FOR AI]:\n${body}`);
                     }
+                } catch (mediaErr) {
+                    console.error('🛑 [MEDIA ERROR]:', mediaErr.message);
+                    body = caption;
                 }
-            } catch (mediaErr) {
-                console.error('🛑 [MEDIA ERROR]:', mediaErr.message);
-                body = caption;
+            }
+
+            if (body && body.trim().length >= 2) {
+                combinedBodyParts.push(body.trim());
             }
         }
 
+        const body = combinedBodyParts.join('\n\n').trim();
         if (!body || body.length < 2) return;
-
-        const groupId = msg.from; // group chat ID (@g.us)
-
-
 
         // ── SESSION INIT ──────────────────────────────────────────────
         if (!chatSessions[senderNumber]) {
             chatSessions[senderNumber] = {
                 history: [],
+                turnStarts: [],
                 verifiedProducts: {},
                 lastMessageTimestamp: Date.now(),
-                chatId: msg.from,
-                senderName: pushName
+                chatId: lastMsg.from,
+                senderName: pushName,
+                phoneNumber: senderNumber,
+                groupName: rawGroupName,
+                orderSubmitted: false
             };
         }
         const session = chatSessions[senderNumber];
         session.lastMessageTimestamp = Date.now();
-        session.chatId = msg.from;
-
-
+        session.chatId = lastMsg.from;
+        session.groupName = rawGroupName;
+        session.senderName = pushName;
 
         // ── CANCEL DETECTION (AI se pehle — fast, no token waste) ─────
         const CANCEL_KEYWORDS = [
@@ -660,18 +656,19 @@ ${captionHint}`
             // Active order session hai aur cancel keh raha hai
             console.log(`🚫 [CANCEL]: @${senderNumber} cancelled their order.`);
             delete chatSessions[senderNumber];
-            await reply('❌ *Order Cancel Ho Gaya.*\nAapka order cancel kar diya gaya hai Apna Khayal Rakhein.');
+            await reply('❌ *Order Cancel Ho Gaya.*\nAapka order cancel kar diya gaya hai Apna Khayal Rekhein.');
             return;
         }
 
         // ── BUILD AGENT INPUT ─────────────────────────────────────────
         // Pehle user ka message session history me save karein
+        const turnStartIndex = session.history.length;
         session.history.push({ role: 'user', content: body });
         const agentInput = session.history;
 
         // ── RUN AGENT (agent session mein cache hota hai) ────────────
         if (!session.agent) {
-            const sessionTools = createTools(session.verifiedProducts);
+            const sessionTools = createTools(session);
             session.agent = createOrderAgent(sessionTools);
             console.log(`🤖 [AGENT]: New agent created for ${senderNumber}`);
         }
@@ -703,54 +700,18 @@ ${captionHint}`
 
         console.log(`📤 [SALESBOT]: ${output.substring(0, 150)}`);
 
-        // ── ORDER_SUCCESS ─────────────────────────────────────────────
-        if (output.includes('ORDER_SUCCESS:')) {
-            const jsonMatch = output.match(/ORDER_SUCCESS:\s*(\{[\s\S]*?\})\s*$/m);
-            if (jsonMatch) {
-                try {
-                    const data = JSON.parse(jsonMatch[1]);
+        // ── ORDER SAVED (via submitOrder tool, set directly on session) ─
+        if (session.orderSubmitted) {
+            await reply('✅ *Order Save Ho Gaya!*\nAapka order mehfooz kar liya gaya hai. Shukriya!');
+            delete chatSessions[senderNumber];
+            return;
+        }
 
-                    const processedItems = data.items.map(item => {
-                        if (!item.unit) {
-                            const sz = (item.size || '').toLowerCase();
-                            const key = `${item.product.toLowerCase()}_${sz}_false`;
-                            const cached = session.verifiedProducts[key] || '';
-                            const unitMatch = cached.match(/Unit:\s*([^\|]+)/);
-                            if (unitMatch) item.unit = unitMatch[1].trim();
-                        }
-                        return { ...item, isNTF: item.product.startsWith('user_raw_NTF_') };
-                    });
-
-                    try {
-                       await writeToExcel(
-                           processedItems,
-                           pushName || senderNumber,
-                           rawGroupName || 'Group',
-                           senderNumber,
-                           data.trading_name || 'UNKNOWN'
-                       );
-
-                        const replyText = output.split(/ORDER_SUCCESS:/)[0].trim();
-                        if (replyText) await reply(replyText);
-                        await reply('✅ *Order Save Ho Gaya!*\nAapka order mehfooz kar liya gaya hai. Shukriya! ');
-
-                        stats.orders++;
-                        delete chatSessions[senderNumber];
-                        return;
-                    } catch (saveErr) {
-                        console.error('🛑 [SAVE ERROR]:', saveErr.message);
-                        await reply('❌ *Error:* Order save karne mein kuch takneeki masla aaya hai. Meharbani karke thori dair baad dobara koshish karein ya admin se raabta karein.');
-                        if (saveErr.message.includes('EBUSY') || saveErr.message.includes('permission denied')) {
-                            console.log('💡 [HINT]: Admin, please close "orders.xlsx" on your computer.');
-                        }
-                        return;
-                    }
-                } catch (parseErr) {
-                    console.error('🛑 [JSON PARSE ERROR]:', parseErr.message);
-                    await reply('Order save karne mein masla aaya. Dobara bhejein please.');
-                    return;
-                }
-            }
+        // Tool reported a save failure — tell the customer plainly, keep
+        // the session alive so they don't have to re-type the whole order.
+        if (output.includes('ORDER_SAVE_FAILED')) {
+            await reply('❌ *Error:* Order save karne mein kuch takneeki masla aaya hai. Meharbani karke thori dair baad dobara "YES" bhej kar koshish karein ya admin se raabta karein.');
+            return;
         }
 
         // ── NORMAL REPLY ──────────────────────────────────────────────
@@ -766,34 +727,44 @@ ${captionHint}`
             );
         }
 
-        // Smooth trim — hamesha last 20 entries rakhein (sudden drop nahi)
-        const MAX_HISTORY = 20;
-        if (session.history.length > MAX_HISTORY) {
-            session.history = session.history.slice(-MAX_HISTORY);
+        // ── HISTORY TRIM (turn-safe) ────────────────────────────────────
+        session.turnStarts.push(turnStartIndex);
+        const MAX_TURNS = 8;
+        if (session.turnStarts.length > MAX_TURNS) {
+            const cutIndex = session.turnStarts[session.turnStarts.length - MAX_TURNS];
+            session.history = session.history.slice(cutIndex);
+            session.turnStarts = session.turnStarts
+                .slice(-MAX_TURNS)
+                .map(idx => idx - cutIndex);
         }
 
         stats.pending = Object.keys(chatSessions).filter(k => chatSessions[k]?.history?.length > 0).length;
 
     } catch (err) {
-        console.error('🛑 [MESSAGE HANDLER ERROR]:', err);
+        console.error('🛑 [MESSAGE HANDLER ERROR]:', err && err.stack ? err.stack : err);
         try {
             // Reset/clear session history to recover from errors/loops
             if (typeof senderNumber !== 'undefined' && chatSessions[senderNumber]) {
                 chatSessions[senderNumber].history = [];
+                chatSessions[senderNumber].turnStarts = [];
             }
             await reply('⚠️ *Masla:* Message process karne mein zyada der lag rahi hai. Meharbani karke apna order wazeh aur saaf likh kar dobara bhejein.');
         } catch (replyErr) {
-            console.error('🛑 [REPLY ERROR ON EXCEPTION]:', replyErr.message);
+            console.error('🛑 [REPLY ERROR ON EXCEPTION]:', replyErr && replyErr.stack ? replyErr.stack : replyErr);
         }
     }
-});
+}
 
-// ── PERIODIC TIMEOUT CHECK (15 Minutes Inactivity) ────────────────────
+// ── PERIODIC TIMEOUT CHECK (Session Inactivity) ────────────────────────
+// NOTE: this used to say "15 Minutes" in the comment but was actually set
+// to 3 minutes in code — that mismatch was silently cancelling orders on
+// customers who paused mid-conversation. Fixed to a single source of truth.
+const SESSION_TIMEOUT_MINUTES = 8;
 setInterval(async () => {
     if (clientStatus !== 'connected') return;
 
     const now = Date.now();
-    const TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
+    const TIMEOUT_MS = SESSION_TIMEOUT_MINUTES * 60 * 1000;
 
     for (const [senderNumber, session] of Object.entries(chatSessions)) {
         if (session.history && session.history.length > 0) {
