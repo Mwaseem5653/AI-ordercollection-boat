@@ -33,7 +33,9 @@ const STOP_WORDS = new Set([
 
 const SYNONYMS = {
     'EXTA':       'EXTRA',
-    'w':             'White',
+    'EXT':        'EXTRA',
+    'ETRA':       'EXTRA',
+    'ERTA':       'EXTRA',
     'XTRA':       'EXTRA',
     'FLORESCENT': 'FLUORESCENT',
     'FLURO':      'FLUORESCENT',
@@ -53,7 +55,10 @@ const SYNONYMS = {
     'BASE':       'PRIMER',
     'PLASTIC':    'SEMI',
     'EXCLSIVE':   'EXCLUSIVE',   // DB typo fix
+    'EXCLUCV':    'EXCLUSIVE',
     'EXCL':       'EXCLUSIVE',
+    'ALTA':       'ALTRA',
+    'BNDX':       'BONDEX',
     // Water typos
     'WHATER':     'WATER',
     'WTER':       'WATER',

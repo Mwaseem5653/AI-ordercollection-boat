@@ -10,7 +10,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { Agent, run, OpenAIChatCompletionsModel, setTracingDisabled, tool } = require('@openai/agents');
 const { z } = require('zod');
 const OpenAI = require('openai');
-const { findBestProductMatchLocal, bulkVerifyProductsLocal } = require('./productSearch');
+const { findBestProductMatchLocal, bulkVerifyProductsLocal, recordOrderSubmissionPreferences, saveTrainingPair } = require('./productSearch');
 require('dotenv').config();
 
 setTracingDisabled(true);
@@ -105,7 +105,7 @@ async function loadOrdersFromExcel() {
 loadOrdersFromExcel();
 
 const chatSessions = {};
-
+const messageBuffers = {};
 
 
 
@@ -207,6 +207,11 @@ Returns array of {original, result} — result same format as findBestProductMat
                     tradingName || 'UNKNOWN'
                 );
 
+                
+
+                
+                
+
                 // Flag on the session so the message handler (which owns the
                 // WhatsApp reply + Excel context) knows to send the fixed
                 // confirmation and close the session — no regex parsing needed.
@@ -242,109 +247,75 @@ Reply ONLY in Roman Urdu. No greetings, no chit-chat, no English to users.
    - Never call same tool twice in one turn.
    - balti=Gallon, F.P=Filling Putty.
    - STRICT TOOL PARAMETER RULES:
-     * Tool call karte waqt user ki quantity (e.g. 2, 5) ko size se ALAG karein.
-     * "requestedSize" me sirf clean size unit (jaise 'Gallon', 'Drum', 'Quarter' ya 'G', 'D', 'Q') pass karein. Kabhi bhi quantity (jaise '2 gln') pass na karein.
-     * "nameOrCode" me brand, product name, code, aur color pass karein. AGAR user ne color mention kiya hai (jaise "red", "green", "magnolia", "ash white" etc.), toh use strictly "nameOrCode" parameter me zaroor include karein. Isme size ya quantity mix na karein.
-     * CODE vs QUANTITY — simple rule: a number immediately followed by a size
-       word ('gln','drum','qtr','g','d','q') is a QUANTITY, never a code.
-       A number followed by 'no'/'code'/'number', or standing alone as a
-       product identifier, is a CODE and belongs in 'nameOrCode'.
-     * Worked examples:
-       - "2 no k 2 gln"  -> code="2", quantity=2, size=Gallon
-       - "bold 55 2 drum" -> code="55" (belongs with brand), quantity=2, size=Drum
-       - "extra semi white 3 gln" -> no code, quantity=3, size=Gallon
-     * If genuinely unsure whether a number is a code or a quantity, ask the
-       customer in one short line instead of guessing — a wrong guess here
-       causes silent order errors.
+     * "requestedSize" me sirf clean size unit (Gallon/Drum/Quarter ya G/D/Q). Kabhi quantity mix na karein.
+     * "nameOrCode" me brand + product + code + color pass karein. Color ho toh zaroor include karein. Size/qty kabhi mix na karein.
+     * CODE vs QUANTITY: number + size word (gln/drum/qtr/g/d/q) = QUANTITY. Number alone or with 'no'/'code' = CODE.
+     * Examples:
+       - "2 no k 2 gln"   → code="2", qty=2, size=Gallon
+       - "bold 55 2 drum" → code="55", qty=2, size=Drum
+       - "extra semi white 3 gln" → no code, qty=3, size=Gallon
+     * Agar number code hai ya qty — genuinely unsure ho toh ek short line mein poocho.
 
-3. SPELLING / TYPOS — DO NOT correct these yourself:
-   - The product search tool already normalizes brand, product, and color spelling
-     (typos, shorthand, common misspellings). Pass the customer's words through
-     mostly as-is inside "nameOrCode" — just keep brand + product + code + color
-     together, and keep size/quantity OUT of "nameOrCode".
-   - Example: customer writes "xtra w/s mangolia 2g" ->
-     nameOrCode = "extra weather shield mangolia", requestedSize = "Gallon".
-     (The tool will fix "mangolia"-type typos on its own — you do not need a
-     correction table for this.)
+3. BRAND NAMES & SPELLING / TYPOS AUTO-CORRECTION:
 
-4. TOOL RESULTS & CORRECTIONS — Har issue wale item ko bilkul saaf aur structured format (Roman Urdu) me dikhayein:
-   - Use bold numbering for items with issues (e.g., "*Item 1:*", "*Item 2:*").
-   - Multi-item issues me har item ke baad double-line break (blank line) zaroor dalein taake saaf format ho.
-   - Clean Urdu templates for each issue type:
-     - MATCH → use official name (no clarification needed).
-     - MULTIPLE_MATCHES →
-       * Pehle chat history aur context check karein. Agar context se clear ho ke user kaunsa option chahta hai (e.g., user pehle kis brand/product ki baat kar raha tha), toh automatic best match select kar lein aur user se na poochein.
-       * Agar context se clear nahi hai aur options ambiguous hain, toh use niche diye gaye AMBIGUOUS format me convert karein aur options show kar ke user se choose karne ko kahein.
-     - AMBIGUOUS (Incomplete Info) →
-       Format: "*Item [N]:* (IN-Complete INFO) - [Item Name/Code] ke liye details adhuri hain. Meharbani karke Brand, Product, ya Color wazeh karein. Kya aap inme se chahte hain? \n[List of options with numbers]"
-     - SIZE_NOT_AVAILABLE →
-       Format: "*Item [N]:* - [Item Name] me requested size available nahi hai. Yeh sizes mil sakti hain: [Available Sizes]. Aapko kaunsa size chahiye?"
-     - NOT_IN_DATABASE →
-       Format: "*Item [N]:* - [Item Name/Code] database me nahi mila. Meharbani karke spelling check karein ya correct code batayein."
-     - NO_TOKEN_NOT_AVAILABLE →
-       Format: "*Item [N]:* - [Item Name] bagher token ke available nahi hai. Kya aapko token ke saath chahiye ya is item ko cancel karna hai?"
+   KNOWN BRANDS:
+   EXTRA, TREND, BOLD, BUDGET, EXCLUSIVE, FLUORESCENT, ALTRA, BONDEX,
+   NIPPON, BERGER, HI, HI LOOK, FAME, KLICK, SATIN, HEAT, TIMBER, WOOD, WOODCOAT, TURPENTINE
 
-5. ORDER FORMAT expected from user:
-   BRAND | CODE or PRODUCT | COLOR | SIZE(Drum/Gallon/Quarter) | QTY
-   e.g. "Bold 1066 2g" or "Bold semi white 2g"
-   Brands: EXTRA, TREND, BOLD, BUDGET, EXCLUSIVE, FLUORESCENT, ALTRA, BONDEX → auto correct word mistakes before query
+   BRAND TYPO RULE — Aap khud brand match karein (AI level):
+   User jo bhi brand ka naam ya shorthand likhe, upar diye KNOWN BRANDS se match karke normalize karein aur Tool ko corrected brand name pass karein.
+   Examples:
+     'ext', 'etra', 'erta', 'extr', 'xtra', 'exta' → EXTRA
+     'excl', 'exclucv', 'exclsive', 'exclusv'       → EXCLUSIVE
+     'fluro', 'florescent', 'flourescent'            → FLUORESCENT
+     'alta', 'altr'                                  → ALTRA
+     'bndx', 'bndex', 'bondx'                        → BONDEX
+     'bdgt', 'budgt'                                 → BUDGET
+     'trnd', 'trendd'                                → TREND
 
-   MISSING INFO — KABHI BHI assume ya guess mat karo. Agar koi zaroori field missing ho:
+   PRODUCT SHORTHAND ALIASES:
+     'lapy'/'laapi'/'lapi' → PUTTY | 'w/s'/'ws' → WEATHER SHIELD | 'w/b'/'wb' → WATER BASE | 'eml'/'enl' → SEMI
 
-   ❌ QTY missing:
-      → User se seedha poochein: "*Qty batayein:* Aapko [Product Name] ki kitni quantity chahiye?"
-      → Qty ke bina order proceed NAHI karna.
+   Example: user writes "exclucv semi white 2g" →
+     nameOrCode = "EXCLUSIVE SEMI WHITE", requestedSize = "Gallon"
 
-   ❌ BRAND missing (aur code ambiguous ho):
-      → Tool AMBIGUOUS return karega. Phir user ko clearly likhein:
-        "*Brand batayein:* [Code] kai brands mein available hai — konsa chahiye?"
-        Aur options list karein (e.g., "1. Altra  2. Hi Look")
-      → Brand confirm hone ke baad hi aage barho.
+4. TOOL RESULTS & CORRECTIONS — Har issue wale item ko Roman Urdu mein dikhayein:
+   - Use bold numbering (*Item 1:*, *Item 2:*).
+   - CRITICAL FORMATTING: Multi-item response mein har item ke baad ek BLANK LINE (empty line) zaroor dalein taake har item alag aur clearly readable ho. Items ko kabhi bhi ek ke baad directly mat likho.
+   - MATCH → official name use karo, koi clarification nahi.
+   - MULTIPLE_MATCHES → pehle context check karo. Agar context se clear ho, auto select karo. Warna AMBIGUOUS format mein convert karo.
+   - AMBIGUOUS → "*Item [N]:* (IN-Complete INFO) - [Item] ke liye details adhuri hain. Kya aap inme se chahte hain?\n[options list]"
+   - SIZE_NOT_AVAILABLE → "*Item [N]:* - [Item] mein requested size nahi hai. Available: [sizes]. Kaunsa chahiye?"
+   - NOT_IN_DATABASE → "*Item [N]:* - [Item/Code] database mein nahi mila. Spelling check karein ya code batayein."
+   - NO_TOKEN_NOT_AVAILABLE → "*Item [N]:* - [Item] bagher token available nahi. Token ke saath chahiye ya cancel?"
 
-   ❌ SIZE missing:
-      → User se poochein: "*Size batayein:* [Product] ke liye kaunsa size chahiye? (Gallon / Drum / Quarter)"
-
-   Rule: Ek message mein sirf ek cheez poochein. Agar qty bhi missing hai aur brand bhi, pehle brand poochein phir qty.
+5. MISSING INFO — KABHI BHI assume ya guess mat karo:
+   - QTY missing → "Qty batayein: [Product] ki kitni quantity chahiye?" — qty ke bina proceed NAHI karna.
+   - BRAND missing (ambiguous code) → Tool AMBIGUOUS return karega → "Brand batayein: [Code] kai brands mein hai — konsa chahiye? [options]"
+   - SIZE missing → "Size batayein: [Product] ke liye Gallon / Drum / Quarter?"
+   - Ek message mein sirf ek cheez poochein. Agar qty bhi missing aur brand bhi — pehle brand, phir qty.
 
 6. TRADING NAME rules:
-   - Agar aapne user se trading/shop name poocha hai, toh uske baad user jo bhi response deta hai (e.g., "Mubeen Traders", "Ali Paint Store"), use strictly "trading_name" samjhein aur verify karne ke liye tools me pass na karein.
-   - KABHI BHI trading name ko product match tools (findBestProductMatch / bulkVerifyProducts) me pass mat karein. Trading name koi product ya code nahi hota, isliye tool error default block karein.
-   - Shop/trading name identifiers: words like 'Traders', 'Paint', 'Store', 'Shop', 'Enterprises', 'Distributors', 'Co' etc. Agar user aisa koi naam bheje aur wo humare paint brands se match nahi karta, toh use strictly "trading_name" samjhein.
-   - Agar user ne order message ke sath hi trading name likh diya (same message mein) toh use directly use karo, alag se mat poochho.
-   - Agar user ne order confirm karne ke BAAD (next message mein) sirf trading name bheja (e.g. "ABC Traders", "Ali Paint") toh use trading name samjho aur turant "submitOrder" tool call karo.
-   - CRITICAL: Jab trading name mil jaye aur sare items verified hoon, sirf "submitOrder" tool call karo — koi alag JSON ya extra confirmation text mat likho uske sath usi turn mein.
+   - User ka trading/shop name KABHI BHI product tools mein pass mat karo.
+   - Words jaise 'Traders', 'Paint', 'Store', 'Shop', 'Enterprises', 'Co' wale naam = trading_name.
+   - Agar order ke saath hi trading name mile → directly use karo. Agar order confirm ke baad alag message mein mile → turant submitOrder call karo.
+   - CRITICAL: Jab trading name + sare items verified → sirf submitOrder call karo, koi extra JSON ya text mat likho.
 
-7. FINAL LIST — sirf tab dikhao jab SARE items MATCH ho jayein + trading name mil jaye agher trading name nahn to phele users se confirm karna h.
-   STRICT FORMATTING & SPACING INSTRUCTIONS:
-   - Final list ka format bilkul fixed aur uniform hona chahiye. Space errors bilkul nahi honi chahiye.
-   - Har line ke start me koi bhi extra space ya tab nahi hona chahiye. Direct serial number se start karein (e.g., "1. ", "2. ").
-   - Serial number ke dot (.) ke baad exact ek space hona chahiye: "1. [Product]..."
-   - Pipe (|) symbols ke dono taraf exact ek space hona chahiye: "[Product] | [Size] | [Qty]". 
-     KABHI BHI bina space ke pipe ya multiple spaces ke sath pipe mat likhna (e.g., NOT "[Product]| [Size]" and NOT "[Product]  |  [Size]").
-   - Item/Qty ke bilkul aakhir me koi extra trailing space nahi honi chahiye.
-   - CRITICAL: In [Product], you MUST use the exact, unmodified product name returned by the match tool (e.g., findBestProductMatch or bulkVerifyProducts), including the trailing size suffix (such as -D, -G, -Q, -DX, -GX, etc.). DO NOT remove or modify this suffix!
-   
-   Final List Format:
+7. FINAL LIST — sirf tab dikhao jab SARE items MATCH hon + trading name mil jaye:
+   - CRITICAL: [Product] mein exact tool-returned name use karo including size suffix (-D/-G/-Q/-DX/-GX). Kabhi modify mat karo.
+   Format:
    1. [Product] | [Size] | [Qty]
 
    Example:
    1. EXTRA ENAMEL 66 BLACK-Q | Qtr | 2
    2. EXTRA ENAMEL 316 SHARP BROWN-G | Gln | 3
-   
+
    Phir poochein: "Yeh list check karlein, theek hai toh YES likh kar confirm kardein. ✅"
 
-8. ON CONFIRMATION (YES/OK/HAAN/G/DONE/CONFIRM) — call the "submitOrder" tool.
-   - Pass each item's exact, unmodified product name as returned by the match
-     tool, including the trailing size suffix (e.g. "EXTRA ENAMEL 66 BLACK-Q").
-     DO NOT strip or modify this suffix.
-   - Pass the trading name you collected.
-   - After the tool returns success, reply with ONE short Roman Urdu line
-     confirming the saved order (e.g. list the items briefly). Do not repeat
-     the tool call, and do not fabricate a JSON block yourself — the tool
-     call itself is what saves the order.
-   - If the tool returns a failure result, tell the customer there was a
-     technical issue and to please resend in a moment — do not retry the
-     tool call more than once in the same turn.`;
+8. ON CONFIRMATION (YES/OK/HAAN/G/DONE/CONFIRM) — submitOrder tool call karo:
+   - Trading name aur exact product names (with suffix) pass karo.
+   - Tool success ke baad ek short Roman Urdu line mein confirm karo. Tool dobara call mat karo.
+   - Tool fail ho → customer ko bolo technical masla aaya, thodi dair baad YES bhejein.`;
 
 function createOrderAgent(sessionTools) {
     return new Agent({
@@ -450,14 +421,36 @@ client.on('message', async msg => {
         console.log(`Group: "${rawGroupName}"`);
         console.log(`Content: ${msg.body.substring(0, 50)}...`);
 
-        // Process message immediately — no buffering/debounce
-        await handleBufferedMessages([msg], senderNumber, pushName, rawGroupName);
+        // Initialize message buffer for user if it doesn't exist
+        if (!messageBuffers[senderNumber]) {
+            messageBuffers[senderNumber] = {
+                messages: [],
+                timer: null
+            };
+        }
+
+        // Add message to buffer
+        messageBuffers[senderNumber].messages.push(msg);
+
+        // Clear existing timer to debounce
+        if (messageBuffers[senderNumber].timer) {
+            clearTimeout(messageBuffers[senderNumber].timer);
+        }
+
+        // Set a 1 minute delay before processing the accumulated messages
+        const waitDuration = 500;
+        messageBuffers[senderNumber].timer = setTimeout(async () => {
+            const buffer = messageBuffers[senderNumber];
+            delete messageBuffers[senderNumber];
+            if (buffer && buffer.messages.length > 0) {
+                await handleBufferedMessages(buffer.messages, senderNumber, pushName, rawGroupName);
+            }
+        }, waitDuration);
 
     } catch (err) {
         console.error('🛑 [EVENT RECEIVE ERROR]:', err && err.stack ? err.stack : err);
     }
 });
-
 
 async function handleBufferedMessages(messages, senderNumber, pushName, rawGroupName) {
     const lastMsg = messages[messages.length - 1];
@@ -561,6 +554,7 @@ CRITICAL LAYOUT & QUANTITY EXTRACTION RULES:
 - "off wht" or "% wht" or "% mll" -> "Off White"
 - "Ashwt" or "Ashut" or "Ashul" -> "Ash White"
 - "putt" -> "Putty"
+- "w"    -> "White"
 - "xtra" or "xts" or "xto" -> "Extra"
 - "enamel" or "ennamel" or "enamml" -> "Enamel"
 - "Stanles" or "Stanl" -> "Stainless"
