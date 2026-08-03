@@ -6,7 +6,7 @@ require('dotenv').config();
 
 // API KEYS (Hardcoded as requested)
 const apiKeys = [
-    "AIzaSyCt4gzC6dDe8UHaXxNYkL_Qte96MHGbaCE",
+    "AIzaSyCt4gzC6dDe8UHaXxNYkL_Qte96MHGbaCE    work",
     "AIzaSyCU5Ihxyd7bxmfAdRcmiW08gNhF00viKMk",
     "AIzaSyB50jDLMPfZMWeBXMKWxfByEq69J-7FYp4",
     "AIzaSyDaD9TAud9DMkrpCYtsQmqbGG_CE-j7uBU",
