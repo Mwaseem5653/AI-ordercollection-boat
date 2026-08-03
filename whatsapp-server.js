@@ -28,7 +28,7 @@ const EXCEL_FILE = path.join(__dirname, 'orders.xlsx');
 const apiKey = process.env.GEMINI_API_KEY;
 
 function getNativeModel() {
-    return new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: 'gemini-2.5-flash' });
+    return new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: 'gemini-3.5-flash-lite' });
 }
 
 // ============================================================
@@ -38,7 +38,7 @@ const geminiOpenAIClient = new OpenAI({
     apiKey: apiKey,
     baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/'
 });
-const geminiModel = new OpenAIChatCompletionsModel(geminiOpenAIClient, 'gemini-2.5-flash');
+const geminiModel = new OpenAIChatCompletionsModel(geminiOpenAIClient, 'gemini-3.5-flash-lite');
 
 // ============================================================
 // STATE
