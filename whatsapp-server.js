@@ -280,14 +280,14 @@ Reply ONLY in Roman Urdu. No greetings, no chit-chat, no English to users.
      nameOrCode = "EXCLUSIVE SEMI WHITE", requestedSize = "Gallon"
 
 4. TOOL RESULTS & CORRECTIONS — Har issue wale item ko Roman Urdu mein dikhayein:
-   - Use bold numbering (*Item 1:*, *Item 2:*).
+   - Use bold numbering strictly of the format *1.*, *2.* (e.g. *1.*, *2.*, *3.* etc. Kabhi bhi "*Item 1:*" ya "Item" word list numbering ke liye use na karein).
    - CRITICAL FORMATTING: Multi-item response mein har item ke baad ek BLANK LINE (empty line) zaroor dalein taake har item alag aur clearly readable ho. Items ko kabhi bhi ek ke baad directly mat likho.
    - MATCH → official name use karo, koi clarification nahi.
    - MULTIPLE_MATCHES → pehle context check karo. Agar context se clear ho, auto select karo. Warna AMBIGUOUS format mein convert karo.
-   - AMBIGUOUS → "*Item [N]:* (IN-Complete INFO) - [Item] ke liye details adhuri hain. Kya aap inme se chahte hain?\n[options list]"
-   - SIZE_NOT_AVAILABLE → "*Item [N]:* - [Item] mein requested size nahi hai. Available: [sizes]. Kaunsa chahiye?"
-   - NOT_IN_DATABASE → "*Item [N]:* - [Item/Code] database mein nahi mila. Spelling check karein ya code batayein."
-   - NO_TOKEN_NOT_AVAILABLE → "*Item [N]:* - [Item] bagher token available nahi. Token ke saath chahiye ya cancel?"
+   - AMBIGUOUS → "*[N].* (IN-Complete INFO) - [Item] ke liye details adhuri hain. Kya aap inme se chahte hain?\n[options list]"
+   - SIZE_NOT_AVAILABLE → "*[N].* - [Item] mein requested size nahi hai. Available: [sizes]. Kaunsa chahiye?"
+   - NOT_IN_DATABASE → "*[N].* - [Item/Code] database mein nahi mila. Spelling check karein ya code batayein."
+   - NO_TOKEN_NOT_AVAILABLE → "*[N].* - [Item] bagher token available nahi. Token ke saath chahiye ya cancel?"
 
 5. MISSING INFO — KABHI BHI assume ya guess mat karo:
    - QTY missing → "Qty batayein: [Product] ki kitni quantity chahiye?" — qty ke bina proceed NAHI karna.
@@ -298,21 +298,28 @@ Reply ONLY in Roman Urdu. No greetings, no chit-chat, no English to users.
 6. TRADING NAME rules:
    - User ka trading/shop name KABHI BHI product tools mein pass mat karo.
    - Words jaise 'Traders', 'Paint', 'Store', 'Shop', 'Enterprises', 'Co' wale naam = trading_name.
-   - Agar order ke saath hi trading name mile → directly use karo. Agar order confirm ke baad alag message mein mile → turant submitOrder call karo.
-   - CRITICAL: Jab trading name + sare items verified → sirf submitOrder call karo, koi extra JSON ya text mat likho.
+   - Har order ke liye trading/shop name ka hona lazmi hai. Agar user ne order ya image ke sath trading name nahi bataya, toh aap hamesha sabse pehle unse poochein: "Meharbani karke apni shop ya trading name batayein?". Trading name ke bina order list confirm ya submit nahi ho sakti.
+   - CRITICAL SAFEGUARD: Aap kabhi bhi khud se "UNKNOWN", "Customer", "pushName", ya koi bhi generic/random trading name nahi maan sakte. Agar aapko wazeh taur par shop name nahi pata, toh aapko har haal mein user se shop name poochhna hi poochhna hai.
 
-7. FINAL LIST — sirf tab dikhao jab SARE items MATCH hon + trading name mil jaye:
+7. FINAL LIST — Sirf tab dikhao jab SARE items MATCH hon aur TRADING NAME bhi mil jaye:
    - CRITICAL: [Product] mein exact tool-returned name use karo including size suffix (-D/-G/-Q/-DX/-GX). Kabhi modify mat karo.
+   - CRITICAL FLOW: Aapko hamesha pehle user ko final list show karni hai aur unka confirmation lena hai. Kabhi bhi automatically submitOrder tool call mat karein bina final list dikhaye aur user ki haan (YES/OK) liye.
+   - MANDATORY TURN SEPARATION: Aapko final list show karne wale turn/message mein 'submitOrder' tool call karna STRICTLY FORBIDDEN hai. Aapko pehle sirf final list dikhani hai aur user ke agle message ka wait karna hai. Jab unka agla message confirm (YES/OK) kare, tabhi sirf agle turn mein 'submitOrder' call karna hai.
    Format:
+   Trading Name: [Trading Name]
+   
    1. [Product] | [Size] | [Qty]
 
    Example:
+   Trading Name: Society Paints
+   
    1. EXTRA ENAMEL 66 BLACK-Q | Qtr | 2
    2. EXTRA ENAMEL 316 SHARP BROWN-G | Gln | 3
 
    Phir poochein: "Yeh list check karlein, theek hai toh YES likh kar confirm kardein. ✅"
 
 8. ON CONFIRMATION (YES/OK/HAAN/G/DONE/CONFIRM) — submitOrder tool call karo:
+   - Jab user list ko confirm kare (e.g., YES, OK, HAAN bhej kar), tabhi sirf aur sirf 'submitOrder' tool call karein.
    - Trading name aur exact product names (with suffix) pass karo.
    - Tool success ke baad ek short Roman Urdu line mein confirm karo. Tool dobara call mat karo.
    - Tool fail ho → customer ko bolo technical masla aaya, thodi dair baad YES bhejein.`;
@@ -469,7 +476,18 @@ async function handleBufferedMessages(messages, senderNumber, pushName, rawGroup
 
             if (msg.hasMedia) {
                 try {
-                    const media = await msg.downloadMedia();
+                    let media;
+                    let retries = 3;
+                    while (retries > 0) {
+                        try {
+                            media = await msg.downloadMedia();
+                            if (media && media.data && media.data.length > 50) break;
+                        } catch (e) {
+                            console.warn(`⚠️ [RETRY MEDIA]: Retry ${4 - retries} failed to download media:`, e.message);
+                        }
+                        retries--;
+                        if (retries > 0) await sleep(1500);
+                    }
                     if (media) {
                         const isAudio = media.mimetype.startsWith('audio') || media.mimetype.includes('ogg');
                         const isImage = media.mimetype.startsWith('image');
@@ -483,11 +501,8 @@ async function handleBufferedMessages(messages, senderNumber, pushName, rawGroup
                             body = res.response.text().trim();
 
                         } else if (isImage) {
-                            console.log(`📸 [IMAGE]: Processing from ${senderNumber}... caption="${caption || 'none'}"`);
-
-                            const captionHint = caption
-                                ? `The user also wrote this caption with the image: "${caption}". Use both the image and caption together.`
-                                : '';
+                            const imgSize = media.data ? Buffer.from(media.data, 'base64').length : 0;
+                            console.log(`📸 [IMAGE]: Processing from ${senderNumber}... size=${imgSize} bytes, caption="${caption || 'none'}"`);
 
                             const schema = {
                                 type: 'OBJECT',
@@ -563,8 +578,7 @@ CRITICAL LAYOUT & QUANTITY EXTRACTION RULES:
 6. TRADING NAME / SHOP NAME:
 - Check for shop/customer name written at the top (e.g. "society Paint PECHS", "Nadeem colle").
 
-Extract all items into the JSON schema, splitting shorthand entries into separate items (one item per size). Do not include zero-quantity items.
-${captionHint}`
+Extract all items into the JSON schema, splitting shorthand entries into separate items (one item per size). Do not include zero-quantity items.`
                                              },
                                              { inlineData: { data: media.data, mimeType: media.mimetype } }
                                          ]
@@ -577,6 +591,7 @@ ${captionHint}`
                              });
 
                             const imageText = res.response.text().trim();
+                            console.log(`\n📸 [RAW IMAGE OCR RESPONSE]:\n${imageText}\n`);
                             try {
                                 const parsed = JSON.parse(imageText);
                                 let formatted = '';
@@ -591,13 +606,20 @@ ${captionHint}`
                                         formatted += `- ${item.product}${size} | Qty: ${qty}\n`;
                                     });
                                 }
-                                body = formatted.trim() || caption;
-                                if (caption && !body.toLowerCase().includes(caption.toLowerCase())) {
-                                    body = `${body}\nUser note: ${caption}`;
-                                }
+                                body = formatted.trim();
                             } catch (parseErr) {
                                 console.error('🛑 [IMAGE JSON PARSE ERROR]:', parseErr.message);
-                                body = imageText || caption;
+                                body = imageText;
+                            }
+
+                            if (caption) {
+                                if (body) {
+                                    if (!body.toLowerCase().includes(caption.toLowerCase())) {
+                                        body = `${body}\nUser note: ${caption}`;
+                                    }
+                                } else {
+                                    body = caption;
+                                }
                             }
                             console.log(`🖼️  [IMAGE EXTRACTED FOR AI]:\n${body}`);
                         }
@@ -615,6 +637,18 @@ ${captionHint}`
 
         const body = combinedBodyParts.join('\n\n').trim();
         if (!body || body.length < 2) return;
+
+        // ── SESSION COMPLETED CLEANUP (1-Minute Grace Period) ──────────
+        if (chatSessions[senderNumber]) {
+            const sess = chatSessions[senderNumber];
+            if (sess.orderCompleted) {
+                const elapsed = Date.now() - sess.completedAt;
+                if (elapsed >= 1 * 60 * 1000) { // 1 minute
+                    console.log(`🧹 [CLEANUP]: Clearing completed session for @${senderNumber} after 1 minute.`);
+                    delete chatSessions[senderNumber];
+                }
+            }
+        }
 
         // ── SESSION INIT ──────────────────────────────────────────────
         if (!chatSessions[senderNumber]) {
@@ -695,9 +729,13 @@ ${captionHint}`
         console.log(`📤 [SALESBOT]: ${output.substring(0, 150)}`);
 
         // ── ORDER SAVED (via submitOrder tool, set directly on session) ─
-        if (session.orderSubmitted) {
+        if (session.orderSubmitted && !session.orderCompleted) {
             await reply('✅ *Order Save Ho Gaya!*\nAapka order mehfooz kar liya gaya hai. Shukriya!');
-            delete chatSessions[senderNumber];
+            
+            // Flag session as completed and store completion timestamp for 1-minute grace period
+            session.orderCompleted = true;
+            session.completedAt = Date.now();
+            session.orderSubmitted = false; // Reset to avoid re-triggering this block
             return;
         }
 
@@ -764,6 +802,10 @@ setInterval(async () => {
         if (session.history && session.history.length > 0) {
             const idleTime = now - (session.lastMessageTimestamp || now);
             if (idleTime >= TIMEOUT_MS) {
+                if (session.orderCompleted) {
+                    delete chatSessions[senderNumber];
+                    continue;
+                }
                 console.log(`⏰ [TIMEOUT]: Session for @${senderNumber} idle for 3 mins. Clearing session.`);
                 try {
                     const chatId = session.chatId;
