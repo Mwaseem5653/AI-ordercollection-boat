@@ -1824,7 +1824,7 @@
     "brand": "Bold",
     "product": "ROP",
     "code": "7704",
-    "color": "",
+    "color": "Red Oxide",
     "size": "Q",
     "sizeUnit": "Quarter",
     "unit": "Qtr"
@@ -4494,7 +4494,7 @@
     "brand": "Bondex",
     "product": "W.P.Powder",
     "code": "",
-    "color": "",
+    "color": "Kg",
     "size": "D",
     "sizeUnit": "Drum",
     "unit": "Drm"
@@ -4504,7 +4504,7 @@
     "brand": "Bondex",
     "product": "W.P.Powder",
     "code": "",
-    "color": "",
+    "color": "Kg",
     "size": "D",
     "sizeUnit": "Drum",
     "unit": "Drm"
@@ -4514,7 +4514,7 @@
     "brand": "Bondex",
     "product": "W.P.Powder",
     "code": "",
-    "color": "",
+    "color": "Kg",
     "size": "T",
     "sizeUnit": "Tin",
     "unit": "TIN"
@@ -4634,7 +4634,7 @@
     "brand": "Budget",
     "product": "Water Primer",
     "code": "04",
-    "color": "",
+    "color": "white",
     "size": "D",
     "sizeUnit": "Drum",
     "unit": "Drm"
@@ -5864,7 +5864,7 @@
     "brand": "Exclusive",
     "product": "Flat Putty",
     "code": "201",
-    "color": "",
+    "color": "white",
     "size": "Q",
     "sizeUnit": "Quarter",
     "unit": "Qtr"
@@ -10074,7 +10074,7 @@
     "brand": "Extra",
     "product": "Matt",
     "code": "721",
-    "color": "",
+    "color": "1-5-1",
     "size": "D",
     "sizeUnit": "Drum",
     "unit": "Drm"

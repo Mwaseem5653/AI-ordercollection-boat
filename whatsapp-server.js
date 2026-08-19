@@ -10,7 +10,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { Agent, run, OpenAIChatCompletionsModel, setTracingDisabled, tool } = require('@openai/agents');
 const { z } = require('zod');
 const OpenAI = require('openai');
-const { findBestProductMatchLocal, bulkVerifyProductsLocal, recordOrderSubmissionPreferences, saveTrainingPair } = require('./productSearch');
+const { findBestProductMatchLocal, bulkVerifyProductsLocal, recordOrderSubmissionPreferences, saveTrainingPair, addKeywordToDictionary } = require('./productSearch');
 require('dotenv').config();
 
 setTracingDisabled(true);
@@ -28,7 +28,7 @@ const EXCEL_FILE = path.join(__dirname, 'orders.xlsx');
 const apiKey = process.env.GEMINI_API_KEY;
 
 function getNativeModel() {
-    return new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: 'gemini-3.5-flash-lite' });
+    return new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: 'gemini-2.5-flash' });
 }
 
 // ============================================================
@@ -38,7 +38,7 @@ const geminiOpenAIClient = new OpenAI({
     apiKey: apiKey,
     baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/'
 });
-const geminiModel = new OpenAIChatCompletionsModel(geminiOpenAIClient, 'gemini-3.5-flash-lite');
+const geminiModel = new OpenAIChatCompletionsModel(geminiOpenAIClient, 'gemini-2.5-flash');
 
 // ============================================================
 // STATE
@@ -138,7 +138,7 @@ Enforces brand requirement for codes in multiple brands (e.g., DD41 exists in Al
 Enforces strict field matching for queries without codes (returns AMBIGUOUS if brand, product, or color is omitted and multiple database variants exist).
 Tool returns: MATCH / MULTIPLE_MATCHES / AMBIGUOUS / LOW_CONFIDENCE / SIZE_NOT_AVAILABLE / NOT_IN_DATABASE / NO_TOKEN_NOT_AVAILABLE`,
         parameters: z.object({
-            nameOrCode: z.string().describe("Product name, code, aur color (e.g., 'EXTRA WHITE PUTTY', 'DA45 RED'). AGAR user ne color mention kiya hai, toh use strictly is parameter me brand/product/code ke sath zaroor include karein. Isme size ya quantity include mat karein."),
+            nameOrCode: z.string().describe("Product name, code (e.g., 'EXTRA PUTTY', 'DA45', 'EXTRA 66'). CRITICAL RULE: Agar Brand aur Item Code dono available hain, toh color omit/remove karke sirf Brand + Code pass karein (e.g. 'EXTRA 66'). Color sirf tab include karein jab Item Code na ho (e.g. 'EXTRA WHITE PUTTY'). Size/qty include mat karein."),
             requestedSize: z.string().describe("Sirf requested size/unit (e.g., 'Gallon', 'Drum', 'Quarter', 'G', 'D', 'Q'). Quantity numbers (jaise '2' ya '5') isme include nahi hone chahiye."),
             wantNoToken: z.boolean().optional()
         }),
@@ -154,7 +154,7 @@ Enforces the same strict matching rules as findBestProductMatch.
 Returns array of {original, result} — result same format as findBestProductMatch (can be MATCH / MULTIPLE_MATCHES / etc.).`,
         parameters: z.object({
             items: z.array(z.object({
-                nameOrCode: z.string().describe("Product name, code, aur color (e.g., 'EXTRA WHITE PUTTY', 'DA45 RED'). AGAR user ne color mention kiya hai, toh use strictly is parameter me brand/product/code ke sath zaroor include karein. Isme size ya quantity include mat karein."),
+                nameOrCode: z.string().describe("Product name, code (e.g., 'EXTRA PUTTY', 'DA45', 'EXTRA 66'). CRITICAL RULE: Agar Brand aur Item Code dono available hain, toh color omit/remove karke sirf Brand + Code pass karein (e.g. 'EXTRA 66'). Color sirf tab include karein jab Item Code na ho (e.g. 'EXTRA WHITE PUTTY'). Size/qty include mat karein."),
                 requestedSize: z.string().describe("Sirf requested size/unit (e.g., 'Gallon', 'Drum', 'Quarter', 'G', 'D', 'Q'). Quantity numbers (jaise '2' ya '5') isme include nahi hone chahiye."),
                 wantNoToken: z.boolean().optional()
             }))
@@ -225,7 +225,25 @@ Returns array of {original, result} — result same format as findBestProductMat
         }
     });
 
-    return [matchTool, bulkVerifyTool, submitOrderTool];
+    const addKeywordShortcutTool = tool({
+        name: 'addKeywordShortcut',
+        description: `Automatically save a newly discovered brand/color/product typo or shorthand to keywords_dictionary.json. Call this whenever a customer confirms a typo or abbreviation (e.g. 'brg' means 'BERGER', 'a.w' means 'ASH WHITE', 'lapy' means 'PUTTY').`,
+        parameters: z.object({
+            category: z.enum(['brands', 'products', 'colors']).describe("Category of keyword ('brands', 'products', or 'colors')"),
+            typo: z.string().describe("The user's typo or shorthand word (e.g. 'BRG', 'TRENDS')"),
+            canonical: z.string().describe("The standard database name (e.g. 'BERGER', 'TREND')")
+        }),
+        execute: async ({ category, typo, canonical }) => {
+            const success = addKeywordToDictionary(category, typo, canonical);
+            if (success) {
+                console.log(`✨ [AUTO-LEARN]: Saved keyword '${typo}' -> '${canonical}' in ${category}`);
+                return `KEYWORD_ADDED: ${typo} -> ${canonical}`;
+            }
+            return `KEYWORD_ADD_FAILED`;
+        }
+    });
+
+    return [matchTool, bulkVerifyTool, submitOrderTool, addKeywordShortcutTool];
 }
 
 // ============================================================
@@ -248,12 +266,16 @@ Reply ONLY in Roman Urdu. No greetings, no chit-chat, no English to users.
    - balti=Gallon, F.P=Filling Putty.
    - STRICT TOOL PARAMETER RULES:
      * "requestedSize" me sirf clean size unit (Gallon/Drum/Quarter ya G/D/Q). Kabhi quantity mix na karein.
-     * "nameOrCode" me brand + product + code + color pass karein. Color ho toh zaroor include karein. Size/qty kabhi mix na karein.
+     * "nameOrCode":
+       - CRITICAL RULE: Agar Brand aur Item Code dono available hain (e.g. "EXTRA 66 RED", "ALTRA DA45 WHITE"), toh search query/parameter se Color ko STRICTLY REMOVE/OMIT kar dein (pass "EXTRA 66", "ALTRA DA45"). Brand + Item Code product identify karne ke liye kafi hai.
+       - Color sirf tab pass karein jab Item Code missing ho (e.g. "EXTRA WHITE PUTTY").
+       - Size ya quantity kabhi mix na karein.
      * CODE vs QUANTITY: number + size word (gln/drum/qtr/g/d/q) = QUANTITY. Number alone or with 'no'/'code' = CODE.
      * Examples:
        - "2 no k 2 gln"   → code="2", qty=2, size=Gallon
        - "bold 55 2 drum" → code="55", qty=2, size=Drum
-       - "extra semi white 3 gln" → no code, qty=3, size=Gallon
+       - "extra 66 red 2 gln" → brand="EXTRA", code="66" (color "red" removed) → nameOrCode="EXTRA 66", qty=2, size=Gallon
+       - "extra semi white 3 gln" → no code, qty=3, size=Gallon → nameOrCode="EXTRA SEMI WHITE"
      * Agar number code hai ya qty — genuinely unsure ho toh ek short line mein poocho.
 
 3. BRAND NAMES & SPELLING / TYPOS AUTO-CORRECTION:
@@ -321,8 +343,40 @@ Reply ONLY in Roman Urdu. No greetings, no chit-chat, no English to users.
 8. ON CONFIRMATION (YES/OK/HAAN/G/DONE/CONFIRM) — submitOrder tool call karo:
    - Jab user list ko confirm kare (e.g., YES, OK, HAAN bhej kar), tabhi sirf aur sirf 'submitOrder' tool call karein.
    - Trading name aur exact product names (with suffix) pass karo.
+   - CRITICAL: Never write python code, 'tool_code', or 'default_api.submitOrder(...)'. Call the submitOrder tool natively using function calling.
    - Tool success ke baad ek short Roman Urdu line mein confirm karo. Tool dobara call mat karo.
    - Tool fail ho → customer ko bolo technical masla aaya, thodi dair baad YES bhejein.`;
+
+function parsePythonSubmitOrder(text) {
+    if (!text || (!text.includes('default_api.submitOrder') && !text.includes('submitOrder('))) {
+        return null;
+    }
+
+    try {
+        const tradingMatch = text.match(/tradingName=['"]([^'"]+)['"]/);
+        const tradingName = tradingMatch ? tradingMatch[1] : 'UNKNOWN';
+
+        const items = [];
+        const itemRegex = /(?:default_api\.)?SubmitorderItems\s*\(\s*product=['"]([^'"]+)['"]\s*,\s*size=['"]([^'"]+)['"]\s*,\s*quantity=([\d.]+)\s*\)/g;
+        
+        let match;
+        while ((match = itemRegex.exec(text)) !== null) {
+            items.push({
+                product: match[1],
+                size: match[2],
+                quantity: parseFloat(match[3])
+            });
+        }
+
+        if (items.length > 0) {
+            return { tradingName, items };
+        }
+    } catch (e) {
+        console.error('🛑 [PARSE PYTHON SUBMIT ORDER ERROR]:', e.message);
+    }
+
+    return null;
+}
 
 function createOrderAgent(sessionTools) {
     return new Agent({
@@ -335,20 +389,28 @@ function createOrderAgent(sessionTools) {
 
 // ============================================================
 // WHATSAPP CLIENT
-// ============================================================
 // Crash-proofing against unhandled EBUSY/resource locked rejections in Puppeteer/Windows
 process.on('unhandledRejection', (reason, promise) => {
-    if (reason && reason.message && reason.message.includes('EBUSY')) {
-        console.warn('⚠️ [EBUSY LOCK BYPASS]: Ignored asynchronous file lock warning during Puppeteer lifecycle.');
+    const msg = (reason && (reason.message || String(reason))) || '';
+    if (msg.includes('EBUSY') || msg.includes('unlink') || msg.includes('lockfile') || msg.includes('first_party_sets') || msg.includes('TimeoutError') || msg.includes('30000ms')) {
+        console.warn('⚠️ [PUPPETEER TIMEOUT/EBUSY BYPASS]: Suppressed initialization timeout or lockfile warning.');
         return;
     }
     console.error('🛑 Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
 const client = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy: new LocalAuth({ clientId: 'salesbot-session' }),
+    authTimeoutMs: 120000,
+    qrMaxRetries: 10,
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1018944814-alpha.html'
+    },
     puppeteer: {
         headless: true,
+        timeout: 120000,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -368,13 +430,28 @@ const client = new Client({
             '--mute-audio',
             '--no-default-browser-check',
             '--safebrowsing-disable-auto-update',
-            '--disk-cache-size=0',           // Cache permission errors fix
-            '--media-cache-size=0',
             '--disable-features=FirstPartySets', // Disable features writing to disk asynchronously
             '--disable-features=PrivacySandboxSettings4',
         ]
     }
 });
+
+// Graceful process cleanup to release .wwebjs_auth file locks on Windows
+async function gracefulShutdown(signal) {
+    console.log(`\n🛑 [SHUTDOWN]: Received ${signal}. Closing WhatsApp Puppeteer cleanly...`);
+    try {
+        if (client) {
+            await client.destroy();
+            console.log('✅ [SHUTDOWN]: WhatsApp client destroyed cleanly. Session locks released.');
+        }
+    } catch (e) {
+        console.error('⚠️ [SHUTDOWN WARNING]:', e.message);
+    }
+    process.exit(0);
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 client.on('qr', qr => {
     qrCodeData = qr;
@@ -390,9 +467,12 @@ client.on('ready', () => {
     console.log('📡 Monitoring groups:', GROUP_NAMES.join(', ') || 'ALL DMs');
 });
 
-client.on('disconnected', reason => {
+client.on('disconnected', async reason => {
     clientStatus = 'stopped';
     console.log('❌ WhatsApp disconnected:', reason);
+    try {
+        await client.destroy();
+    } catch (_) {}
 });
 
 // ============================================================
@@ -510,7 +590,7 @@ async function handleBufferedMessages(messages, senderNumber, pushName, rawGroup
                                     trading_name: { type: 'STRING', description: 'Shop/Trading name mentioned in the image if any' },
                                     items: {
                                         type: 'ARRAY',
-                                        description: 'List of order items extracted from the image',
+                                        description: 'List of order items extracted from the image. MANDATORY: Extract all products listed.',
                                         items: {
                                             type: 'OBJECT',
                                             properties: {
@@ -521,7 +601,8 @@ async function handleBufferedMessages(messages, senderNumber, pushName, rawGroup
                                             required: ['product']
                                         }
                                     }
-                                }
+                                },
+                                required: ['items']
                             };
 
                             const res = await getNativeModel().generateContent({
@@ -530,7 +611,12 @@ async function handleBufferedMessages(messages, senderNumber, pushName, rawGroup
                                         role: 'user',
                                         parts: [
                                             {
-                                                 text: `This is a handwritten order slip/image from a Paint & Hardware wholesale shop.
+                                                 text: `This image contains a handwritten order slip from a Paint & Hardware wholesale shop.
+
+MANDATORY ITEM EXTRACTION RULE:
+- Every image sent is an order slip containing product items. You MUST extract all order items and products visible in the image into the "items" array.
+- NEVER return only the trading_name without items. Extracting all order items and products is your primary mandatory requirement.
+
 CRITICAL LAYOUT & QUANTITY EXTRACTION RULES:
 
 1. INDEPENDENT COLUMN SEGREGATION:
@@ -576,9 +662,9 @@ CRITICAL LAYOUT & QUANTITY EXTRACTION RULES:
 - "W/S" -> "Weather Shield"
 
 6. TRADING NAME / SHOP NAME:
-- Check for shop/customer name written at the top (e.g. "society Paint PECHS", "Nadeem colle").
+- Check for shop/customer name written at the top (e.g. "society Paint PECHS", "Nadeem colle"). Extract it as trading_name if present.
 
-Extract all items into the JSON schema, splitting shorthand entries into separate items (one item per size). Do not include zero-quantity items.`
+Extract ALL order items into the JSON schema "items" array. Split shorthand entries into separate items (one item per size). Do not omit any items.`
                                              },
                                              { inlineData: { data: media.data, mimeType: media.mimetype } }
                                          ]
@@ -706,7 +792,64 @@ Extract all items into the JSON schema, splitting shorthand entries into separat
 
         stats.total++;
         const result = await run(orderAgent, agentInput, { maxTurns: 20 });
-        const output = (result.finalOutput || '').trim();
+        let output = (result.finalOutput || '').trim();
+
+        // ── FALLBACK PARSER FOR TOOL_CODE / DEFAULT_API ─────────────────
+        const fallbackParsed = parsePythonSubmitOrder(output);
+        if (fallbackParsed && fallbackParsed.items.length > 0) {
+            console.log(`✨ [FALLBACK PARSER]: Intercepted raw python submitOrder code output. Saving ${fallbackParsed.items.length} items for "${fallbackParsed.tradingName}"...`);
+            try {
+                const sessionCache = session.verifiedProducts || {};
+                const processedItems = fallbackParsed.items.map(item => {
+                    let unit = item.unit;
+                    if (!unit) {
+                        const sz = (item.size || '').toLowerCase();
+                        const key = `${item.product.toLowerCase()}_${sz}_false`;
+                        const cached = sessionCache[key] || '';
+                        const unitMatch = cached.match(/Unit:\s*([^\|]+)/);
+                        if (unitMatch) unit = unitMatch[1].trim();
+                    }
+                    return {
+                        ...item,
+                        unit,
+                        isNTF: item.product.startsWith('user_raw_NTF_')
+                    };
+                });
+
+                await writeToExcel(
+                    processedItems,
+                    session.senderName,
+                    session.groupName || 'Group',
+                    session.phoneNumber,
+                    fallbackParsed.tradingName || 'UNKNOWN'
+                );
+
+                session.orderSubmitted = true;
+                session.orderCompleted = true;
+                session.completedAt = Date.now();
+                stats.orders++;
+
+                output = '✅ *Order Save Ho Gaya!*\nAapka order mehfooz kar liya gaya hai. Shukriya!';
+            } catch (e) {
+                console.error('🛑 [FALLBACK PARSE WRITE ERROR]:', e.message);
+                output = '❌ *Error:* Order save karne mein kuch takneeki masla aaya hai. Meharbani karke thori dair baad dobara "YES" bhej kar koshish karein.';
+            }
+        } else if (output.includes('tool_code') || output.includes('default_api.')) {
+            console.log(`⚠️ [CLEANUP]: Stripping raw python tool code from model output.`);
+            output = output
+                .replace(/^tool_code\s*/g, '')
+                .replace(/print\(default_api\.[^)]+\)/g, '')
+                .replace(/default_api\.[a-zA-Z0-9_]+/g, '')
+                .trim();
+
+            if (!output) {
+                if (session.orderSubmitted) {
+                    output = '✅ *Order Save Ho Gaya!*\nAapka order mehfooz kar liya gaya hai. Shukriya!';
+                } else {
+                    output = 'Order ki details mil gayi hain. Meharbani karke "YES" bhej kar confirm kardein.';
+                }
+            }
+        }
 
         if (!output) return;
 
@@ -952,10 +1095,23 @@ async function writeToExcel(items, pushname, groupName, senderNumber, tradingNam
 // ============================================================
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// ============================================================
-// WHATSAPP INIT
-// ============================================================
-client.initialize();
+async function initializeWhatsApp() {
+    try {
+        await client.initialize();
+    } catch (err) {
+        console.error('⚠️ [INIT ERROR]: WhatsApp initialize failed:', err.message);
+        if (err.message && (err.message.includes('TimeoutError') || err.message.includes('30000ms') || err.message.includes('120000ms'))) {
+            console.log('🔄 [AUTO CLEAN]: Session corrupt or timed out after logout. Cleaning .wwebjs_auth folder...');
+            const authPath = path.join(__dirname, '.wwebjs_auth');
+            if (fs.existsSync(authPath)) {
+                try { fs.rmSync(authPath, { recursive: true, force: true }); } catch (_) {}
+            }
+            console.log('🔄 [RE-INIT]: Re-starting client for fresh QR Code...');
+            try { await client.initialize(); } catch (e2) { console.error('🛑 [RE-INIT ERROR]:', e2.message); }
+        }
+    }
+}
+initializeWhatsApp();
 
 // ============================================================
 // REST API

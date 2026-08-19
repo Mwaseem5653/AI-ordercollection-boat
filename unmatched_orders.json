@@ -1,0 +1,107 @@
+[
+  {
+    "timestamp": "2026-08-19T03:55:04.488Z",
+    "query": "bold rop 2 gallon",
+    "requestedSize": "Gallon",
+    "phoneNumber": "UNKNOWN",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-19T03:53:54.031Z",
+    "query": "bold rop 2 gallon",
+    "requestedSize": "Gallon",
+    "phoneNumber": "UNKNOWN",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-19T03:45:51.714Z",
+    "query": "EXTRA R.O.P",
+    "requestedSize": "Gallon",
+    "phoneNumber": "28974017179724",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-18T04:33:37.106Z",
+    "query": "Extra Weather Shield Primer Soil",
+    "requestedSize": "Drum",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-18T04:33:37.071Z",
+    "query": "Extra Weather Shield Primer Soil",
+    "requestedSize": "Quarter",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-18T04:33:37.038Z",
+    "query": "Extra Weather Shield Primer Soil",
+    "requestedSize": "Gallon",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-18T04:32:35.560Z",
+    "query": "EXTRA WEATHER SHIELD PRIMER SOIL",
+    "requestedSize": "Drum",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-18T04:32:35.543Z",
+    "query": "EXTRA WEATHER SHIELD PRIMER SOIL",
+    "requestedSize": "Quarter",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-18T04:32:35.520Z",
+    "query": "EXTRA WEATHER SHIELD PRIMER SOIL",
+    "requestedSize": "Gallon",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-18T04:14:05.964Z",
+    "query": "BOLD WATER PRIMER SOIL",
+    "requestedSize": "Drum",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-18T04:14:05.943Z",
+    "query": "BOLD WATER PRIMER SOIL",
+    "requestedSize": "Quarter",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-18T04:14:05.921Z",
+    "query": "BOLD WATER PRIMER SOIL",
+    "requestedSize": "Gallon",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-18T04:13:29.130Z",
+    "query": "BOLD WATER PRIMER SOIL",
+    "requestedSize": "Drum",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-18T04:13:29.107Z",
+    "query": "BOLD WATER PRIMER SOIL",
+    "requestedSize": "Quarter",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-18T04:13:29.067Z",
+    "query": "BOLD WATER PRIMER SOIL",
+    "requestedSize": "Gallon",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  }
+]

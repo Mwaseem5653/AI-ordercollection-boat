@@ -80,8 +80,51 @@ const SYNONYMS = {
     // EML / ENL → SEMI for product matching
     'EML':        'SEMI',
     'ENL':        'SEMI',
-    
 };
+
+const KEYWORDS_FILE = path.join(__dirname, 'keywords_dictionary.json');
+let DYNAMIC_SYNONYMS = { ...SYNONYMS };
+
+function loadKeywordsDictionary() {
+    DYNAMIC_SYNONYMS = { ...SYNONYMS };
+    if (!fs.existsSync(KEYWORDS_FILE)) return;
+    try {
+        const raw = fs.readFileSync(KEYWORDS_FILE, 'utf8');
+        const dict = JSON.parse(raw);
+        ['brands', 'products', 'colors'].forEach(cat => {
+            if (dict[cat] && typeof dict[cat] === 'object') {
+                for (const [k, v] of Object.entries(dict[cat])) {
+                    if (k && v) {
+                        DYNAMIC_SYNONYMS[k.toUpperCase().trim()] = v.toUpperCase().trim();
+                    }
+                }
+            }
+        });
+        console.log(`✅ [KEYWORDS]: Loaded ${Object.keys(DYNAMIC_SYNONYMS).length} total keyword synonyms from keywords_dictionary.json.`);
+    } catch (e) {
+        console.error('🛑 [KEYWORDS ERROR]: Could not load keywords_dictionary.json:', e.message);
+    }
+}
+
+function addKeywordToDictionary(category, typo, canonical) {
+    if (!['brands', 'products', 'colors'].includes(category)) return false;
+    try {
+        let dict = { brands: {}, products: {}, colors: {} };
+        if (fs.existsSync(KEYWORDS_FILE)) {
+            dict = JSON.parse(fs.readFileSync(KEYWORDS_FILE, 'utf8'));
+        }
+        if (!dict[category]) dict[category] = {};
+        dict[category][typo.toUpperCase().trim()] = canonical.toUpperCase().trim();
+        fs.writeFileSync(KEYWORDS_FILE, JSON.stringify(dict, null, 2), 'utf8');
+        loadKeywordsDictionary();
+        return true;
+    } catch (e) {
+        console.error('🛑 [ADD KEYWORD ERROR]:', e.message);
+        return false;
+    }
+}
+
+loadKeywordsDictionary();
 
 // Products jinmein sirf generic type diya ho (brand missing) — AMBIGUOUS
 const AMBIGUOUS_TYPES = {
@@ -199,9 +242,12 @@ loadProducts();
 function tokenize(text) {
     let cleanText = text.toUpperCase();
 
-    // Normalize W/S, WS, W/B, WB
+    // Handle dot notation in aliases (e.g. A.W -> ASH WHITE, O.W -> OFF WHITE)
+    cleanText = cleanText.replace(/\bA\.W\b|\bAW\b/g, 'ASH WHITE');
+    cleanText = cleanText.replace(/\bO\.W\b|\bOW\b/g, 'OFF WHITE');
     cleanText = cleanText.replace(/\bW\/S\b|\bWS\b/g, 'WEATHER SHIELD');
-    cleanText = cleanText.replace(/\bW\/B\b|\bWB\b/g, 'WATER BASE');
+    // Strip quantity number + size word patterns (e.g. "2 GALLON", "2 GLN", "5 DRUM", "3 QTR")
+    cleanText = cleanText.replace(/\b\d+\s*(GALLON|GLN|DRUM|DRM|QUARTER|QTR|BALTI|PCS|PIECE|KG)\b/gi, ' ');
 
     // Normalize color typos and synonyms
     cleanText = cleanText.replace(/\bASHWITE\b|\bASHWT\b|\bASHUT\b|\bASHUL\b|\bASHWHITE\b|\bASHWHT\b/g, 'ASH WHITE');
@@ -224,7 +270,17 @@ function tokenize(text) {
     }
 
     return expanded
-        .map(t => SYNONYMS[t] || t)
+        .map(t => {
+            if (DYNAMIC_SYNONYMS[t]) return DYNAMIC_SYNONYMS[t];
+            // Plural / trailing 'S' stem check: e.g. TRENDS -> TREND, EXTRAS -> EXTRA
+            if (t.length > 3 && t.endsWith('S')) {
+                const withoutS = t.slice(0, -1);
+                if (MAJOR_GROUPS.has(withoutS) || BRAND_SET.has(withoutS) || DYNAMIC_SYNONYMS[withoutS]) {
+                    return DYNAMIC_SYNONYMS[withoutS] || withoutS;
+                }
+            }
+            return t;
+        })
         .filter(t => !STOP_WORDS.has(t) && t.length >= 1);
 }
 
@@ -946,8 +1002,33 @@ function runFuzzyFallback(nameOrCode, requestedSize, wantNoToken, sessionCache) 
     return null;
 }
 
+const UNMATCHED_LOG_FILE = path.join(__dirname, 'unmatched_orders.json');
+
+function logUnmatchedOrder(nameOrCode, requestedSize, result, phoneNumber) {
+    // Only log if the result is strictly 'NOT_IN_DATABASE' (ignoring MATCH, AMBIGUOUS, SIZE_NOT_AVAILABLE, etc.)
+    if (!result || result !== 'NOT_IN_DATABASE') return;
+    try {
+        let logs = [];
+        if (fs.existsSync(UNMATCHED_LOG_FILE)) {
+            try { logs = JSON.parse(fs.readFileSync(UNMATCHED_LOG_FILE, 'utf8')); } catch (_) { logs = []; }
+        }
+        logs.unshift({
+            timestamp: new Date().toISOString(),
+            query: nameOrCode,
+            requestedSize: requestedSize,
+            phoneNumber: phoneNumber || 'UNKNOWN',
+            result: result
+        });
+        if (logs.length > 500) logs = logs.slice(0, 500);
+        fs.writeFileSync(UNMATCHED_LOG_FILE, JSON.stringify(logs, null, 2), 'utf8');
+        console.log(`📝 [ERROR LOGGED]: Saved unmatched entry "${nameOrCode}" (${result}) to unmatched_orders.json`);
+    } catch (e) {
+        console.error('🛑 [UNMATCHED LOG ERROR]:', e.message);
+    }
+}
+
 function findBestProductMatchLocal(nameOrCode, requestedSize, wantNoToken = false, sessionCache = null, phoneNumber = null) {
-    const result = findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken, sessionCache, phoneNumber);
+    let result = findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken, sessionCache, phoneNumber);
 
     // ── CRITICAL: Skip fuzzy fallback if query contained a code token ──
     // If user gave a code (numeric or alphanumeric) that wasn't found,
@@ -957,17 +1038,26 @@ function findBestProductMatchLocal(nameOrCode, requestedSize, wantNoToken = fals
         const hadCodeToken = queryTokensForCheck.some(t => isCodeToken(t));
         if (hadCodeToken) {
             console.log(`🚫 [FUZZY SKIP]: Code detected in query "${nameOrCode}" — returning NOT_IN_DATABASE directly.`);
-            return 'NOT_IN_DATABASE';
+            result = 'NOT_IN_DATABASE';
+        } else {
+            const fuzzy = runFuzzyFallback(nameOrCode, requestedSize, wantNoToken, sessionCache);
+            if (fuzzy) result = fuzzy;
         }
-        const fuzzy = runFuzzyFallback(nameOrCode, requestedSize, wantNoToken, sessionCache);
-        if (fuzzy) return fuzzy;
     }
+
+    if (result && !result.startsWith('MATCH:')) {
+        logUnmatchedOrder(nameOrCode, requestedSize, result, phoneNumber);
+    }
+
     return result;
 }
 
 module.exports = { 
     findBestProductMatchLocal, 
     bulkVerifyProductsLocal, 
-    loadProducts
+    loadProducts,
+    loadKeywordsDictionary,
+    addKeywordToDictionary,
+    logUnmatchedOrder
 };
  
