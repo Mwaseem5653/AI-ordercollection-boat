@@ -184,18 +184,31 @@ Returns array of {original, result} — result same format as findBestProductMat
         execute: async ({ items, tradingName }) => {
             try {
                 const processedItems = items.map(item => {
+                    let productName = item.product;
                     let unit = item.unit;
+
+                    // Auto-resolve product name if raw code/shorthand was passed (e.g. '9007-G', '9007', '49-G')
+                    const cleanProd = productName.replace(/-[DGQ]$/i, '').trim();
+                    if (!productName.includes(' ') || productName.match(/^\d+-[DGQ]$/i) || /^\d+$/.test(cleanProd) || !productName.includes('-')) {
+                        const verified = findBestProductMatchLocal(cleanProd, item.size, false, sessionCache, session.phoneNumber);
+                        if (verified && verified.startsWith('MATCH:')) {
+                            const nameMatch = verified.match(/MATCH:\s*([^\|]+)/);
+                            if (nameMatch) productName = nameMatch[1].trim();
+                        }
+                    }
+
                     if (!unit) {
                         const sz = (item.size || '').toLowerCase();
-                        const key = `${item.product.toLowerCase()}_${sz}_false`;
+                        const key = `${productName.toLowerCase()}_${sz}_false`;
                         const cached = sessionCache[key] || '';
                         const unitMatch = cached.match(/Unit:\s*([^\|]+)/);
                         if (unitMatch) unit = unitMatch[1].trim();
                     }
                     return {
                         ...item,
+                        product: productName,
                         unit,
-                        isNTF: item.product.startsWith('user_raw_NTF_')
+                        isNTF: productName.startsWith('user_raw_NTF_')
                     };
                 });
 
@@ -304,7 +317,7 @@ Reply ONLY in Roman Urdu. No greetings, no chit-chat, no English to users.
 4. TOOL RESULTS & CORRECTIONS — Har issue wale item ko Roman Urdu mein dikhayein:
    - Use bold numbering strictly of the format *1.*, *2.* (e.g. *1.*, *2.*, *3.* etc. Kabhi bhi "*Item 1:*" ya "Item" word list numbering ke liye use na karein).
    - CRITICAL FORMATTING: Multi-item response mein har item ke baad ek BLANK LINE (empty line) zaroor dalein taake har item alag aur clearly readable ho. Items ko kabhi bhi ek ke baad directly mat likho.
-   - MATCH → official name use karo, koi clarification nahi.
+   - MATCH → Tool se jo official full database name mila hai (e.g. 'EXTRA STAINLESS 9007 ZEPHYR-G'), customer ko WhatsApp reply mein WAHI official name dikhayein. User ka raw input/code (jaise '9007-G' ya '49-G') wapas dikhana STRICTLY FORBIDDEN hai.
    - MULTIPLE_MATCHES → pehle context check karo. Agar context se clear ho, auto select karo. Warna AMBIGUOUS format mein convert karo.
    - AMBIGUOUS → "*[N].* (IN-Complete INFO) - [Item] ke liye details adhuri hain. Kya aap inme se chahte hain?\n[options list]"
    - SIZE_NOT_AVAILABLE → "*[N].* - [Item] mein requested size nahi hai. Available: [sizes]. Kaunsa chahiye?"
@@ -324,7 +337,7 @@ Reply ONLY in Roman Urdu. No greetings, no chit-chat, no English to users.
    - CRITICAL SAFEGUARD: Aap kabhi bhi khud se "UNKNOWN", "Customer", "pushName", ya koi bhi generic/random trading name nahi maan sakte. Agar aapko wazeh taur par shop name nahi pata, toh aapko har haal mein user se shop name poochhna hi poochhna hai.
 
 7. FINAL LIST — Sirf tab dikhao jab SARE items MATCH hon aur TRADING NAME bhi mil jaye:
-   - CRITICAL: [Product] mein exact tool-returned name use karo including size suffix (-D/-G/-Q/-DX/-GX). Kabhi modify mat karo.
+   - CRITICAL: [Product] mein exact tool-returned official name use karo including size suffix (-D/-G/-Q/-DX/-GX). User ne jo raw code bhejha tha (jaise '9007-G' ya '49-G'), usko tool-returned official database name (jaise 'EXTRA STAINLESS 9007 ZEPHYR-G') se MANDATORY replace karke hi list dikhayein. Raw code return karna bilkul manaa hai.
    - CRITICAL FLOW: Aapko hamesha pehle user ko final list show karni hai aur unka confirmation lena hai. Kabhi bhi automatically submitOrder tool call mat karein bina final list dikhaye aur user ki haan (YES/OK) liye.
    - MANDATORY TURN SEPARATION: Aapko final list show karne wale turn/message mein 'submitOrder' tool call karna STRICTLY FORBIDDEN hai. Aapko pehle sirf final list dikhani hai aur user ke agle message ka wait karna hai. Jab unka agla message confirm (YES/OK) kare, tabhi sirf agle turn mein 'submitOrder' call karna hai.
    Format:
