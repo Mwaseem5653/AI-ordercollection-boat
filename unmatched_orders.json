@@ -1,107 +1,72 @@
 [
   {
-    "timestamp": "2026-08-27T11:55:19.986Z",
+    "timestamp": "2026-08-29T07:03:51.172Z",
+    "query": "BOLD R.O.P 7704",
+    "requestedSize": "Gallon",
+    "phoneNumber": "171296264560837",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-29T07:03:51.151Z",
+    "query": "BOLD R.O.P 7704",
+    "requestedSize": "Quarter",
+    "phoneNumber": "171296264560837",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-28T07:18:27.713Z",
+    "query": "SEMI 18 OFF WHITE",
+    "requestedSize": "Quarter",
+    "phoneNumber": "28974017179724",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-28T06:45:48.723Z",
+    "query": "SEMI 18 WHITE",
+    "requestedSize": "Gallon",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-28T06:45:48.706Z",
+    "query": "SEMI 27 OFF WHITE",
+    "requestedSize": "Gallon",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-28T06:45:48.679Z",
+    "query": "SEMI 18 OFF WHITE",
+    "requestedSize": "Gallon",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-28T06:43:40.650Z",
+    "query": "EXCLUSIVE OIL OFFWHITE",
+    "requestedSize": "Quarter",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-28T06:34:42.404Z",
+    "query": "GTPsmar",
+    "requestedSize": "Drum",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-28T06:34:42.369Z",
+    "query": "Puvasmen gloss",
+    "requestedSize": "Quarter",
+    "phoneNumber": "4428312633530",
+    "result": "NOT_IN_DATABASE"
+  },
+  {
+    "timestamp": "2026-08-28T06:01:16.704Z",
     "query": "Enamel Black",
     "requestedSize": "Gallon",
-    "phoneNumber": "UNKNOWN",
-    "result": "NOT_IN_DATABASE"
-  },
-  {
-    "timestamp": "2026-08-27T11:47:40.162Z",
-    "query": "ENAMEL BLACK",
-    "requestedSize": "Gallon",
     "phoneNumber": "28974017179724",
-    "result": "NOT_IN_DATABASE"
-  },
-  {
-    "timestamp": "2026-08-27T11:47:12.637Z",
-    "query": "ENAMEL BLACK",
-    "requestedSize": "Gallon",
-    "phoneNumber": "28974017179724",
-    "result": "NOT_IN_DATABASE"
-  },
-  {
-    "timestamp": "2026-08-18T04:33:37.106Z",
-    "query": "Extra Weather Shield Primer Soil",
-    "requestedSize": "Drum",
-    "phoneNumber": "4428312633530",
-    "result": "NOT_IN_DATABASE"
-  },
-  {
-    "timestamp": "2026-08-18T04:33:37.071Z",
-    "query": "Extra Weather Shield Primer Soil",
-    "requestedSize": "Quarter",
-    "phoneNumber": "4428312633530",
-    "result": "NOT_IN_DATABASE"
-  },
-  {
-    "timestamp": "2026-08-18T04:33:37.038Z",
-    "query": "Extra Weather Shield Primer Soil",
-    "requestedSize": "Gallon",
-    "phoneNumber": "4428312633530",
-    "result": "NOT_IN_DATABASE"
-  },
-  {
-    "timestamp": "2026-08-18T04:32:35.560Z",
-    "query": "EXTRA WEATHER SHIELD PRIMER SOIL",
-    "requestedSize": "Drum",
-    "phoneNumber": "4428312633530",
-    "result": "NOT_IN_DATABASE"
-  },
-  {
-    "timestamp": "2026-08-18T04:32:35.543Z",
-    "query": "EXTRA WEATHER SHIELD PRIMER SOIL",
-    "requestedSize": "Quarter",
-    "phoneNumber": "4428312633530",
-    "result": "NOT_IN_DATABASE"
-  },
-  {
-    "timestamp": "2026-08-18T04:32:35.520Z",
-    "query": "EXTRA WEATHER SHIELD PRIMER SOIL",
-    "requestedSize": "Gallon",
-    "phoneNumber": "4428312633530",
-    "result": "NOT_IN_DATABASE"
-  },
-  {
-    "timestamp": "2026-08-18T04:14:05.964Z",
-    "query": "BOLD WATER PRIMER SOIL",
-    "requestedSize": "Drum",
-    "phoneNumber": "4428312633530",
-    "result": "NOT_IN_DATABASE"
-  },
-  {
-    "timestamp": "2026-08-18T04:14:05.943Z",
-    "query": "BOLD WATER PRIMER SOIL",
-    "requestedSize": "Quarter",
-    "phoneNumber": "4428312633530",
-    "result": "NOT_IN_DATABASE"
-  },
-  {
-    "timestamp": "2026-08-18T04:14:05.921Z",
-    "query": "BOLD WATER PRIMER SOIL",
-    "requestedSize": "Gallon",
-    "phoneNumber": "4428312633530",
-    "result": "NOT_IN_DATABASE"
-  },
-  {
-    "timestamp": "2026-08-18T04:13:29.130Z",
-    "query": "BOLD WATER PRIMER SOIL",
-    "requestedSize": "Drum",
-    "phoneNumber": "4428312633530",
-    "result": "NOT_IN_DATABASE"
-  },
-  {
-    "timestamp": "2026-08-18T04:13:29.107Z",
-    "query": "BOLD WATER PRIMER SOIL",
-    "requestedSize": "Quarter",
-    "phoneNumber": "4428312633530",
-    "result": "NOT_IN_DATABASE"
-  },
-  {
-    "timestamp": "2026-08-18T04:13:29.067Z",
-    "query": "BOLD WATER PRIMER SOIL",
-    "requestedSize": "Gallon",
-    "phoneNumber": "4428312633530",
     "result": "NOT_IN_DATABASE"
   }
 ]

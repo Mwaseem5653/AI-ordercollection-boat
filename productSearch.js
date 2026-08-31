@@ -507,7 +507,7 @@ function findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken = 
     const queryTokens = tokenize(query).filter(t => t !== targetSuffix);
     if (queryTokens.length === 0) return 'NOT_IN_DATABASE';
 
-    const queryBrand = queryTokens.find(t => BRAND_SET.has(t) || MAJOR_GROUPS.has(t)) || null;
+    let queryBrand = queryTokens.find(t => BRAND_SET.has(t) || MAJOR_GROUPS.has(t)) || null;
 
     const PRODUCT_KEYWORDS = new Set([
         'MATT','SEMI','PUTTY','PRIMER','ENAMEL','DISTEMPER','THINNER','GLOSS','GLOSSY',
@@ -613,11 +613,17 @@ function findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken = 
         } else {
             const uniqueBrands = [...new Set(codeMatches.map(p => p.brandUpper).filter(Boolean))];
             if (uniqueBrands.length > 1) {
-                const brandList = uniqueBrands.slice(0, 5).map(b => b.charAt(0) + b.slice(1).toLowerCase()).join(', ');
-                const suffix    = uniqueBrands.length > 5 ? '... and more' : '';
-                const response  = `AMBIGUOUS: "${queryCode}" kai brands mein hai — konsa chahiye? ${brandList}${suffix}`;
-                console.log(`⚠️ [STRICT CODE]: ${response}`);
-                return response;
+                const extraMatches = codeMatches.filter(p => p.brandUpper === 'EXTRA');
+                if (extraMatches.length > 0) {
+                    console.log(`🎯 [DEFAULT BRAND EXTRA]: Code "${queryCode}" found in multiple brands (${uniqueBrands.join(', ')}). Defaulting to brand EXTRA.`);
+                    codeMatches = extraMatches;
+                } else {
+                    const brandList = uniqueBrands.slice(0, 5).map(b => b.charAt(0) + b.slice(1).toLowerCase()).join(', ');
+                    const suffix    = uniqueBrands.length > 5 ? '... and more' : '';
+                    const response  = `AMBIGUOUS: "${queryCode}" kai brands mein hai — konsa chahiye? ${brandList}${suffix}`;
+                    console.log(`⚠️ [STRICT CODE]: ${response}`);
+                    return response;
+                }
             }
         }
 
@@ -700,10 +706,17 @@ function findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken = 
 
     // ── AMBIGUITY CHECK ───────────────────────────────────────────
     const ambig = checkAmbiguity(queryTokens);
-    if (ambig) {
-        const top5   = ambig.brands.slice(0, 5);
-        const suffix = ambig.brands.length > 5 ? '... and more' : '';
-        return `AMBIGUOUS: "${ambig.type}" kai brands mein hai — konsa chahiye? ${top5.join(', ')}${suffix}`;
+    if (ambig && !queryBrand) {
+        const extraCandidate = PRODUCTS.find(p => p.brandUpper === 'EXTRA' && queryTokens.every(t => p.fullNameTokenSet.has(t) || p.productUpper.includes(t)));
+        if (extraCandidate) {
+            console.log(`🎯 [DEFAULT BRAND EXTRA]: Generic query "${query}" matched multiple brands for "${ambig.type}". Defaulting brand to EXTRA.`);
+            queryBrand = 'EXTRA';
+            // candidates will be filtered by brand in the STRICT FIELD PATH below
+        } else {
+            const top5   = ambig.brands.slice(0, 5);
+            const suffix = ambig.brands.length > 5 ? '... and more' : '';
+            return `AMBIGUOUS: "${ambig.type}" kai brands mein hai — konsa chahiye? ${top5.join(', ')}${suffix}`;
+        }
     }
 
     // ── STRICT FIELD PATH (no code in query) ─────────────────────
@@ -822,6 +835,14 @@ function findBestProductMatchLocalCore(nameOrCode, requestedSize, wantNoToken = 
             return `SIZE_NOT_AVAILABLE: ${sampleProduct.baseName || sampleProduct.fullName} | Available sizes: ${availableSizes} | Requested: ${targetSuffix || 'ANY'}`;
         }
         return 'NOT_IN_DATABASE';
+    }
+
+    if (candidates.length > 1 && !queryBrand) {
+        const extraCandidates = candidates.filter(p => p.brandUpper === 'EXTRA');
+        if (extraCandidates.length > 0) {
+            console.log(`🎯 [DEFAULT BRAND EXTRA]: Multiple candidate matches found across brands. Defaulting candidates to brand EXTRA.`);
+            candidates = extraCandidates;
+        }
     }
 
     if (candidates.length === 1) {
