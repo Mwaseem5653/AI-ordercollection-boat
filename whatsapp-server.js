@@ -265,11 +265,10 @@ Returns array of {original, result} — result same format as findBestProductMat
 const SALESBOT_INSTRUCTIONS = `SalesBot: Paint & Hardware wholesale WhatsApp order assistant.
 Reply ONLY in Roman Urdu. No greetings, no chit-chat, no English to users.
 
-1. CLASSIFY — SIRF pehle fresh message par:
-   - Agar conversation history BILKUL nahi hai (pehla message) AND message sirf general chat hai
-     (Hi/Hello/Thanks/Kaise ho/Shukriya jaise greetings) → output "IGNORE_CHAT", no tools.
-   - IMPORTANT: Agar koi bhi conversation history already maujood hai (ongoing order session),
-     toh KABHI BHI "IGNORE_CHAT" mat likho — chahe user kuch bhi likhey. Hamesha respond karo.
+1. CLASSIFY & RESPOND:
+   - Hamesha user ki query, greeting (e.g. Hi, Hello, Kaise ho), ya sawaal ka wazeh aur short Roman Urdu mein jawab dein.
+   - Kabhi bhi chat ko ignore na karein aur na hi "IGNORE_CHAT" mat likhein. Hamesha respond karein.
+   - Agar user general query pooche (jaise rates, variety, delivery, ya general sawal), toh apni maujooda database/info ke mutabiq unhe samjhao aur guidance do.
    - Order/confirmation (item+qty+size OR YES/OK/HAAN/G/DONE/CONFIRM) → process.
    - Mid-order query, correction, ya ghalat info → context dekh kar samjhao ya dobara poochein.
 
@@ -771,17 +770,25 @@ Extract ALL order items into the JSON schema "items" array. Split shorthand entr
 
         // ── CANCEL DETECTION (AI se pehle — fast, no token waste) ─────
         const CANCEL_KEYWORDS = [
-            'cancel', 'band karo', 'band kardo', 'rehne do', 'rehnedo',
-            'choro', 'chordo', 'mat karo', 'nahi chahiye', 'nahin chahiye',
-            'order cancel', 'cancel order', 'rok do', 'rokdo',
-            'chor do', 'chordo', 'nahi karna', 'nahin karna','ignore','Ignore','cancl','cncl','khatam kardo','leave','leaveit'
+            'cancel', 'cancle', 'cancl', 'cncl',
+            'band karo', 'band kardo', 'band kar do', 'band kro',
+            'rehne do', 'rehnedo', 'rehne dy', 'rehne dain', 'rehne_do',
+            'choro', 'chordo', 'chor do', 'chor dain', 'chor_do',
+            'mat karo', 'mat kar do', 'mat kro',
+            'nahi chahiye', 'nahin chahiye', 'ni chahiye', 'nhi chahiye',
+            'order cancel', 'cancel order',
+            'rok do', 'rokdo', 'rok kar', 'rok_do',
+            'nahi karna', 'nahin karna', 'ni karna', 'nhi karna',
+            'ignore', 'khatam', 'khatam kardo', 'khatam kar do', 'khatam kro',
+            'leave', 'leaveit', 'leave it',
+            'clear', 'reset', 'delete'
         ];
         const bodyLower = body.toLowerCase();
         const isCancelRequest = CANCEL_KEYWORDS.some(kw => bodyLower.includes(kw));
 
-        if (isCancelRequest && session.history.length > 0) {
+        if (isCancelRequest) {
             // Active order session hai aur cancel keh raha hai
-            console.log(`🚫 [CANCEL]: @${senderNumber} cancelled their order.`);
+            console.log(`🚫 [CANCEL]: @${senderNumber} cancelled their order. Clearing session immediately.`);
             delete chatSessions[senderNumber];
             await reply('❌ *Order Cancel Ho Gaya.*\nAapka order cancel kar diya gaya hai Apna Khayal Rekhein.');
             return;
@@ -866,32 +873,14 @@ Extract ALL order items into the JSON schema "items" array. Split shorthand entr
 
         if (!output) return;
 
-        // ── IGNORE ────────────────────────────────────────────────────
-        if (output.startsWith('IGNORE_CHAT')) {
-            stats.ignored++;
-            if (session.history.length === 0) {
-                // Pehla message tha aur general chat — bilkul ignore karo
-                console.log(`⏭️  [IGNORE_CHAT]: ${senderNumber} — fresh general message, skipping.`);
-                delete chatSessions[senderNumber];
-            } else {
-                // ⚠️ Mid-order mein IGNORE_CHAT — yeh nahi hona chahiye
-                // Code-level safeguard: user se poochein kya chahiye
-                console.log(`⚠️  [IGNORE_CHAT mid-session]: ${senderNumber} — AI ignored mid-order msg. Asking clarification.`);
-                await reply('Order mn correction h ? Ya cancel karna h.');
-            }
-            return;
-        }
-
         console.log(`📤 [SALESBOT]: ${output.substring(0, 150)}`);
 
         // ── ORDER SAVED (via submitOrder tool, set directly on session) ─
-        if (session.orderSubmitted && !session.orderCompleted) {
+        if (session.orderSubmitted || session.orderCompleted) {
             await reply('✅ *Order Save Ho Gaya!*\nAapka order mehfooz kar liya gaya hai. Shukriya!');
             
-            // Flag session as completed and store completion timestamp for 1-minute grace period
-            session.orderCompleted = true;
-            session.completedAt = Date.now();
-            session.orderSubmitted = false; // Reset to avoid re-triggering this block
+            console.log(`🧹 [CLEANUP]: Clearing session immediately for @${senderNumber} after order confirmation.`);
+            delete chatSessions[senderNumber];
             return;
         }
 
@@ -917,7 +906,7 @@ Extract ALL order items into the JSON schema "items" array. Split shorthand entr
 
         // ── HISTORY TRIM (turn-safe) ────────────────────────────────────
         session.turnStarts.push(turnStartIndex);
-        const MAX_TURNS = 8;
+        const MAX_TURNS = 15;
         if (session.turnStarts.length > MAX_TURNS) {
             const cutIndex = session.turnStarts[session.turnStarts.length - MAX_TURNS];
             session.history = session.history.slice(cutIndex);
